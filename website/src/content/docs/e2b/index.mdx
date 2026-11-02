@@ -72,4 +72,4 @@ export default class Api extends Cloudflare.Worker<Api>()(
 
 ## Out of scope
 
-E2B's `/admin` and `/nodes` endpoints are for E2B's own operators and are not part of this provider. envd's `init`, `freeze`, `fsfreeze` and `collapse` calls are made by E2B's orchestrator, not by users.
+E2B's `/admin` and `/nodes` endpoints are for E2B's own operators and are not part of this provider. envd's `init`, `freeze`, `fsfreeze` and `collapse` calls are made by E2B's orchestrator, not by users. The team list, status and limits views need a personal access token and describe your account rather than infrastructure; use the dashboard.
