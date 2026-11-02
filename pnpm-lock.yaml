@@ -4120,6 +4120,25 @@ importers:
         specifier: workspace:*
         version: link:../../packages/alchemy-test
 
+  examples/daytona-sandboxes:
+    dependencies:
+      '@alchemy.run/cloudflare':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare
+      '@alchemy.run/daytona':
+        specifier: workspace:*
+        version: link:../../packages/daytona
+      alchemy:
+        specifier: workspace:*
+        version: link:../../packages/alchemy
+      effect:
+        specifier: 4.1.0
+        version: 4.1.0
+    devDependencies:
+      '@alchemy.run/test':
+        specifier: workspace:*
+        version: link:../../packages/alchemy-test
+
   examples/dev-stress:
     dependencies:
       '@alchemy.run/aws':
