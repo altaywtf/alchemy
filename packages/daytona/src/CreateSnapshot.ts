@@ -1,3 +1,5 @@
+import type { UnsupportedDockerfile } from "@alchemy.run/docker/BuildPlan";
+import type { DockerfileSyntaxError } from "@alchemy.run/docker/DockerfileParser";
 import type * as sandboxes from "@distilled.cloud/daytona/sandbox";
 import type * as snapshots from "@distilled.cloud/daytona/snapshots";
 import * as Binding from "alchemy/Binding";
@@ -15,7 +17,7 @@ import type {
 } from "./Snapshot.ts";
 
 /** `create` input: a name and one source, as `Daytona.Snapshot` takes them (Dockerfile as content). */
-export interface CreateSnapshotInput extends ResolvedSnapshotSource {
+export interface CreateSnapshotInput extends Omit<ResolvedSnapshotSource, "contextHashes"> {
   readonly name: string;
 }
 
@@ -40,6 +42,8 @@ export interface CreateSnapshotClient {
     | SnapshotRunFailed
     | SnapshotImageTagInvalid
     | SnapshotContextUnsupported
+    | UnsupportedDockerfile
+    | DockerfileSyntaxError
     | StateTimeout
     | StateFailed
     | NameOutsidePrefix,

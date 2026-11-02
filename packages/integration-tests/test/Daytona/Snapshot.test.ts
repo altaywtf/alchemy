@@ -21,10 +21,11 @@ test.provider(
         .deploy(Daytona.Snapshot("Bad", { image: "node:latest" }))
         .pipe(Effect.flip);
       expect(String(latest)).toContain("fixed tag");
+      // An inline Dockerfile has no build context to copy from.
       const copy = yield* stack
         .deploy(Daytona.Snapshot("Bad", { dockerfile: { content: "FROM node:22\nCOPY . /app\n" } }))
         .pipe(Effect.flip);
-      expect(String(copy)).toContain("can't copy local files");
+      expect(String(copy)).toContain("cannot COPY from a build context");
       yield* stack.destroy();
     }),
   { tags: ["provider:daytona", "live"], timeout: 60_000 },
@@ -36,7 +37,7 @@ test.provider.skipIf(!!process.env.FAST)(
     Effect.gen(function* () {
       yield* stack.destroy();
 
-      const { pulled, built, warm } = yield* stack.deploy(
+      const { pulled, built, context, warm } = yield* stack.deploy(
         Effect.gen(function* () {
           const pulled = yield* Daytona.Snapshot("Pulled", {
             image: "node:22-bookworm-slim",
@@ -52,15 +53,24 @@ test.provider.skipIf(!!process.env.FAST)(
             memory: 1,
             disk: 3,
           });
+          const context = yield* Daytona.Snapshot("Context", {
+            context: new URL("./fixtures/snapshot-context", import.meta.url).pathname,
+            build: { args: { GREETING: "from-alchemy" } },
+            cpu: 1,
+            memory: 1,
+            disk: 3,
+          });
           const warm = yield* Daytona.Snapshot("Warm", {
             from: pulled,
             run: ["echo warm > /home/daytona/marker", "test -f /home/daytona/marker"],
           });
-          return { pulled, built, warm };
+          return { pulled, built, context, warm };
         }),
       );
       expect(pulled.state).toEqual("active");
       expect(built.state).toEqual("active");
+      // The build ran check.js from the uploaded context with the baked ARG.
+      expect(context.state).toEqual("active");
       expect(warm.state).toEqual("active");
       expect(warm.sourceSandboxId).toMatch(/.+/);
       // The build sandbox is gone once the snapshot is captured.
@@ -82,6 +92,7 @@ test.provider.skipIf(!!process.env.FAST)(
       yield* stack.destroy();
       expect(yield* find(pulled.snapshotId)).toBeUndefined();
       expect(yield* find(built.snapshotId)).toBeUndefined();
+      expect(yield* find(context.snapshotId)).toBeUndefined();
       expect(yield* find(warm.snapshotId)).toBeUndefined();
     }),
   { tags: ["provider:daytona", "live", "slow"], timeout: 1_200_000 },

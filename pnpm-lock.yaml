@@ -9039,6 +9039,12 @@ importers:
 
   packages/daytona:
     dependencies:
+      '@alchemy.run/docker':
+        specifier: workspace:*
+        version: link:../docker
+      '@distilled.cloud/aws':
+        specifier: workspace:*
+        version: link:../../submodules/distilled/packages/aws
       '@distilled.cloud/core':
         specifier: workspace:*
         version: link:../../submodules/distilled/packages/core

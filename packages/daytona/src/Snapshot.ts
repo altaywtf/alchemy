@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import * as BuildPlan from "@alchemy.run/docker/BuildPlan";
+import type { InlineDockerfile } from "@alchemy.run/docker/Dockerfile";
+import * as DockerfileParser from "@alchemy.run/docker/DockerfileParser";
 import * as sandboxes from "@distilled.cloud/daytona/sandbox";
 import * as snapshots from "@distilled.cloud/daytona/snapshots";
 import { Unowned } from "alchemy/AdoptPolicy";
@@ -7,9 +10,8 @@ import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
+import { uploadBuildContext } from "./internal/BuildContext.ts";
 import { createInternalLabels } from "./internal/Labels.ts";
 import { isOwnedName, resolveName } from "./internal/Names.ts";
 import { runCommand } from "./internal/Process.ts";
@@ -22,11 +24,6 @@ export type SnapshotRef = { readonly name: string };
 
 /** A private registry. Accepts a `Daytona.Registry` or `{ registryId }`. */
 export type SnapshotRegistry = { readonly registryId: string };
-
-/** Inline Dockerfile content; `Dockerfile.inline` from `@alchemy.run/docker` produces one. */
-export interface InlineDockerfile {
-  readonly content: string;
-}
 
 export type GpuType = snapshots.GpuType;
 
@@ -44,11 +41,22 @@ export interface SnapshotProps {
    */
   image?: string;
   /**
-   * A Dockerfile Daytona builds on its own builders: a path, or inline
-   * content (`Dockerfile.inline`). No local Docker is needed. Changing it
-   * replaces the snapshot. Exclusive with `image` and `from`.
+   * A Dockerfile Daytona builds on its own builders: a path (relative to
+   * the cwd), or inline content (`Dockerfile.inline`). No local Docker is
+   * needed. Files it `COPY`s are uploaded from {@link context}. Changing the
+   * Dockerfile or any file it copies replaces the snapshot. Exclusive with
+   * `image` and `from`.
+   * @default `${context}/Dockerfile` when `context` is set
    */
   dockerfile?: string | InlineDockerfile;
+  /**
+   * Build context directory for a Dockerfile path. Only the files its
+   * `COPY`/`ADD` instructions reach are uploaded (after `.dockerignore`).
+   * Inline Dockerfiles have no context and can't `COPY` local files.
+   */
+  context?: string;
+  /** Build arguments, baked into the Dockerfile's `ARG` defaults. */
+  build?: { args?: Record<string, string> };
   /**
    * Build a warm base from another snapshot: start a sandbox from `from`,
    * run `run` in it, and capture its filesystem as this snapshot. Use it to
@@ -149,6 +157,15 @@ export type Snapshot = Resource<
  * });
  * ```
  *
+ * ### Building a Directory
+ * **Example:** A Dockerfile and the files it copies
+ * ```typescript
+ * export const App = Daytona.Snapshot("App", {
+ *   context: "./sandbox",
+ *   build: { args: { NODE_ENV: "production" } },
+ * });
+ * ```
+ *
  * ### A Warm Base to Fork From
  * **Example:** Clone and install once, then start every sandbox from it
  * ```typescript
@@ -166,19 +183,29 @@ export type Snapshot = Resource<
  */
 export const Snapshot = Resource<Snapshot>("Daytona.Snapshot");
 
+/**
+ * What Daytona's builders can build: any Dockerfile, for amd64. Build
+ * arguments are baked into `ARG` defaults; BuildKit secrets have no field
+ * in Daytona's build request and are rejected.
+ */
+export const capabilities: BuildPlan.Capabilities = {
+  target: "Daytona.Snapshot",
+  platforms: ["linux/amd64"],
+};
+
 /** The snapshot props name more than one of `image`, `dockerfile` and `from`, or none. */
 export class SnapshotSourceInvalid extends Data.TaggedError("Daytona.SnapshotSourceInvalid")<{
   readonly message: string;
 }> {}
 
-/** A Dockerfile copies local files, which Daytona can't build without the build context. */
+/** A runtime build's Dockerfile copies local files, which only a deploy-time `context` can provide. */
 export class SnapshotContextUnsupported extends Data.TaggedError(
   "Daytona.SnapshotContextUnsupported",
 )<{
   readonly line: string;
 }> {
   override get message() {
-    return `Daytona snapshot Dockerfiles can't copy local files yet (${this.line.trim()}). Build the image elsewhere and pass it as \`image\`, or fetch the files in a RUN step.`;
+    return `A snapshot built at runtime can't copy local files (${this.line.trim()}). Declare it with Daytona.Snapshot and a \`context\`, or fetch the files in a RUN step.`;
   }
 }
 
@@ -220,47 +247,86 @@ const checkImage = (image: string) => {
     : Effect.void;
 };
 
-/** Dockerfile content, with local COPY/ADD rejected (no context upload yet). */
-const dockerfileContent = Effect.fn(function* (dockerfile: string | InlineDockerfile) {
-  let content: string;
-  if (typeof dockerfile === "string") {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    content = yield* fs.readFileString(path.resolve(dockerfile));
-  } else {
-    content = dockerfile.content;
+/**
+ * A Dockerfile with `args` written into its `ARG` defaults, for builders
+ * that take no build arguments.
+ */
+const bakeArgs = (
+  dockerfile: DockerfileParser.ParsedDockerfile,
+  args: Readonly<Record<string, string>>,
+): DockerfileParser.ParsedDockerfile => {
+  if (Object.keys(args).length === 0) return dockerfile;
+  const bake = <I extends DockerfileParser.Instruction>(instruction: I): I =>
+    instruction._tag !== "ARG" || !instruction.vars.some(([name]) => name in args)
+      ? instruction
+      : {
+          ...instruction,
+          raw: `ARG ${instruction.vars
+            .map(([name, value]) => {
+              const baked = name in args ? args[name] : value;
+              return baked === undefined ? name : `${name}=${JSON.stringify(baked)}`;
+            })
+            .join(" ")}`,
+        };
+  return {
+    ...dockerfile,
+    globalArgs: dockerfile.globalArgs.map(bake),
+    stages: dockerfile.stages.map((stage) => ({
+      ...stage,
+      instructions: stage.instructions.map(bake),
+    })),
+  };
+};
+
+/** The Dockerfile's text for Daytona, with build arguments baked in. */
+const dockerfileText = (plan: BuildPlan.BuildPlan) =>
+  DockerfileParser.render(bakeArgs(plan.dockerfile, plan.args));
+
+/**
+ * Check Dockerfile content built at runtime (a Worker has no file system,
+ * so there is no context to copy from).
+ */
+export const checkRuntimeDockerfile = Effect.fn(function* (content: string) {
+  const parsed = yield* DockerfileParser.parse(content);
+  const { violations } = BuildPlan.check(parsed, capabilities, "linux/amd64");
+  if (violations.length > 0) {
+    return yield* new BuildPlan.UnsupportedDockerfile({
+      target: capabilities.target,
+      violations,
+      message: violations.map((v) => `line ${v.line}: ${v.instruction}: ${v.reason}`).join("\n"),
+    });
   }
-  for (const line of content.split("\n")) {
-    const match = /^\s*(COPY|ADD)\s+(.*)$/i.exec(line);
-    if (!match) continue;
-    const args = match[2]!.split(/\s+/);
-    const fromStage = args.some((a) => a.startsWith("--from="));
-    const remote = args
-      .filter((a) => !a.startsWith("--"))
-      .slice(0, -1)
-      .every((a) => /^https?:\/\//.test(a));
-    if (!fromStage && !remote) return yield* new SnapshotContextUnsupported({ line });
+  for (const stage of parsed.stages) {
+    for (const instruction of stage.instructions) {
+      if (instruction._tag !== "COPY" && instruction._tag !== "ADD") continue;
+      if (instruction.flags.some((flag) => flag.name === "from")) continue;
+      const local = instruction.sources.filter(
+        (source) => !/^(https?:\/\/|git@)/.test(source) && !source.startsWith("<<"),
+      );
+      if (local.length > 0) return yield* new SnapshotContextUnsupported({ line: instruction.raw });
+    }
   }
-  return content;
 });
 
 /** What the snapshot is built from, resolved; its hash decides rebuilds. */
 const resolveSource = Effect.fn(function* (news: SnapshotProps) {
-  const sources = [news.image, news.dockerfile, news.from].filter((s) => s !== undefined);
+  const fromDockerfile = news.dockerfile !== undefined || news.context !== undefined;
+  const sources = [news.image, fromDockerfile ? true : undefined, news.from].filter(
+    (s) => s !== undefined,
+  );
   if (sources.length !== 1) {
     return yield* new SnapshotSourceInvalid({
-      message: "Daytona.Snapshot takes exactly one of `image`, `dockerfile` or `from`",
+      message: "Daytona.Snapshot takes exactly one of `image`, `dockerfile`/`context` or `from`",
     });
   }
   if (news.image !== undefined) yield* checkImage(news.image);
-  const dockerfile =
-    news.dockerfile !== undefined ? yield* dockerfileContent(news.dockerfile) : undefined;
-  const from = yield* refName(news.from);
-  const source = {
-    image: news.image,
-    dockerfile,
-    from,
-    run: news.run ?? [],
+  const plan = fromDockerfile
+    ? yield* BuildPlan.plan(
+        { dockerfile: news.dockerfile, context: news.context, build: { args: news.build?.args } },
+        { capabilities },
+      )
+    : undefined;
+  const sizing = {
     entrypoint: news.entrypoint,
     cpu: news.cpu,
     memory: news.memory,
@@ -270,7 +336,21 @@ const resolveSource = Effect.fn(function* (news: SnapshotProps) {
     regionId: news.regionId,
     sandboxClass: news.sandboxClass,
   };
-  return { ...source, buildHash: yield* sha256(source) };
+  const source = {
+    image: news.image,
+    dockerfile: plan ? dockerfileText(plan) : undefined,
+    from: yield* refName(news.from),
+    run: news.run ?? [],
+    ...sizing,
+  };
+  const buildHash = yield* sha256({
+    image: source.image,
+    plan: plan?.hash,
+    from: source.from,
+    run: source.run,
+    ...sizing,
+  });
+  return { source, plan, buildHash };
 });
 
 export const toSnapshotAttributes = (
@@ -388,6 +468,8 @@ export interface ResolvedSnapshotSource {
   readonly gpuType?: GpuType[] | undefined;
   readonly regionId?: string | undefined;
   readonly sandboxClass?: snapshots.SandboxClass | undefined;
+  /** Uploaded build contexts the Dockerfile copies from (`buildInfo.contextHashes`). */
+  readonly contextHashes?: string[] | undefined;
 }
 
 /**
@@ -422,7 +504,9 @@ export const buildSnapshot = Effect.fn(function* (input: {
       name,
       imageName: source.image,
       buildInfo:
-        source.dockerfile !== undefined ? { dockerfileContent: source.dockerfile } : undefined,
+        source.dockerfile !== undefined
+          ? { dockerfileContent: source.dockerfile, contextHashes: source.contextHashes }
+          : undefined,
       entrypoint: source.entrypoint,
       cpu: source.cpu,
       memory: source.memory,
@@ -471,7 +555,7 @@ export const SnapshotProvider = () =>
       }),
       reconcile: Effect.fn(function* ({ id, news, output, session }) {
         const name = yield* resolveName(id, news.name, output?.name);
-        const source = yield* resolveSource(news);
+        const { source, plan, buildHash } = yield* resolveSource(news);
 
         // Observe
         const current = yield* getSnapshot(output?.snapshotId ?? name);
@@ -479,17 +563,22 @@ export const SnapshotProvider = () =>
           // Ensure usable: reactivate a snapshot Daytona deactivated after
           // two weeks unused, and wait out a build already in flight.
           const ready = current.state === "active" ? current : yield* waitForSnapshot(current.id);
-          return toSnapshotAttributes(ready, output?.buildHash ?? source.buildHash);
+          return toSnapshotAttributes(ready, output?.buildHash ?? buildHash);
         }
 
-        // Ensure
+        // Ensure — upload what the Dockerfile copies, then build.
+        for (const warning of plan?.warnings ?? []) yield* session.note(warning);
+        const contextHashes =
+          plan !== undefined && plan.files.length > 0
+            ? [yield* uploadBuildContext(plan)]
+            : undefined;
         const built = yield* buildSnapshot({
           name,
-          source,
+          source: { ...source, contextHashes },
           labels: yield* createInternalLabels(id),
           note: session.note,
         });
-        return toSnapshotAttributes(built, source.buildHash);
+        return toSnapshotAttributes(built, buildHash);
       }),
       delete: Effect.fn(function* ({ output }) {
         yield* deleteSnapshot(output.snapshotId);

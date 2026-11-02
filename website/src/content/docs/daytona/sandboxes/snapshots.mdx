@@ -57,7 +57,21 @@ export const Tools = Daytona.Snapshot("Tools", {
 });
 ```
 
-Daytona's builders run the build; you don't need Docker. Dockerfiles that `COPY` local files aren't supported yet: fetch the files in a `RUN` step, or build the image elsewhere and pass `image`.
+Daytona's builders run the build; you don't need Docker.
+
+## Build a directory with its Dockerfile
+
+```typescript
+// src/Images.ts
+import * as Daytona from "@alchemy.run/daytona";
+
+export const App = Daytona.Snapshot("App", {
+  context: "./sandbox",
+  build: { args: { NODE_ENV: "production" } },
+});
+```
+
+The files `./sandbox/Dockerfile` copies are uploaded to Daytona, minus anything in `.dockerignore`. Changing one of them rebuilds the snapshot. Build arguments are written into the Dockerfile's `ARG` defaults. Daytona builds for `linux/amd64` only.
 
 ## Capture a warm base
 

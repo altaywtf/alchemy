@@ -13,6 +13,7 @@ import { makeAccess } from "./DaytonaBindings.ts";
 import { RuntimeObjects } from "./RuntimeObjects.ts";
 import {
   buildSnapshot,
+  checkRuntimeDockerfile,
   deleteSnapshot,
   getSnapshot,
   toSnapshotAttributes,
@@ -46,6 +47,8 @@ export const CreateSnapshotHttp = Layer.effect(
             ? Effect.fail(new NameOutsidePrefix({ name, prefix }))
             : authorize(
                 Effect.gen(function* () {
+                  if (source.dockerfile !== undefined)
+                    yield* checkRuntimeDockerfile(source.dockerfile);
                   const built = yield* buildSnapshot({
                     name,
                     source,
