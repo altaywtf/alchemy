@@ -8,6 +8,7 @@ import { DaytonaAuth } from "./AuthProvider.ts";
 import * as Credentials from "./Credentials.ts";
 import { OrganizationRole, OrganizationRoleProvider } from "./OrganizationRole.ts";
 import { Registry, RegistryProvider } from "./Registry.ts";
+import { RuntimeObjects, RuntimeObjectsProvider } from "./RuntimeObjects.ts";
 import { Sandbox, SandboxProvider } from "./Sandbox.ts";
 import { Secret, SecretProvider } from "./Secret.ts";
 import { Snapshot, SnapshotProvider } from "./Snapshot.ts";
@@ -41,6 +42,7 @@ export const providers = () =>
         ApiKeyProvider(),
         OrganizationRoleProvider(),
         RegistryProvider(),
+        RuntimeObjectsProvider(),
         SandboxProvider(),
         SecretProvider(),
         SnapshotProvider(),

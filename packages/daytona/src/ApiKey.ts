@@ -1,4 +1,5 @@
 import * as apiKeys from "@distilled.cloud/daytona/api_keys";
+import { Credentials } from "@distilled.cloud/daytona/Credentials";
 import { Unowned } from "alchemy/AdoptPolicy";
 import { deepEqual, isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
@@ -7,6 +8,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import { isOwnedName, resolveName } from "./internal/Names.ts";
+import { currentOrganizationId } from "./internal/Organization.ts";
 import type { Providers } from "./Providers.ts";
 
 /**
@@ -44,6 +46,10 @@ export interface ApiKeyAttributes {
   expiresAt: string | undefined;
   /** When the key was created. */
   createdAt: string;
+  /** The Daytona API root the key belongs to. */
+  apiBaseUrl: string;
+  /** The organization the key acts on. */
+  organizationId: string;
   /**
    * The key itself, sent as `Authorization: Bearer <value>`. Daytona shows
    * it only when the key is created, so alchemy keeps it in state.
@@ -99,6 +105,11 @@ export class ApiKeyValueMissing extends Data.TaggedError("Daytona.ApiKeyValueMis
 
 const sorted = (permissions: readonly string[]) => [...permissions].sort();
 
+const apiRoot = Effect.gen(function* () {
+  const credentials = yield* Credentials;
+  return (yield* credentials).apiBaseUrl;
+});
+
 export const ApiKeyProvider = () =>
   Provider.effect(
     ApiKey,
@@ -112,11 +123,14 @@ export const ApiKeyProvider = () =>
         stables: ["name", "createdAt", "value"],
         list: Effect.fn(function* () {
           const keys = yield* apiKeys.listApiKeys({});
+          const apiBaseUrl = yield* apiRoot;
           return keys.map((key) => ({
             name: key.name,
             permissions: key.permissions,
             expiresAt: key.expiresAt ?? undefined,
             createdAt: key.createdAt,
+            apiBaseUrl,
+            organizationId: key.organizationId ?? "",
             value: Redacted.make(""),
           }));
         }),
@@ -145,6 +159,8 @@ export const ApiKeyProvider = () =>
             permissions: observed.permissions,
             expiresAt: observed.expiresAt ?? undefined,
             createdAt: observed.createdAt,
+            apiBaseUrl: output?.apiBaseUrl ?? (yield* apiRoot),
+            organizationId: output?.organizationId ?? (yield* currentOrganizationId),
             value: output?.value ?? Redacted.make(""),
           };
           // The value is only shown at creation, so a key with no state
@@ -188,6 +204,8 @@ export const ApiKeyProvider = () =>
             permissions: created.permissions,
             expiresAt: created.expiresAt ?? undefined,
             createdAt: created.createdAt,
+            apiBaseUrl: yield* apiRoot,
+            organizationId: yield* currentOrganizationId,
             value,
           };
         }),

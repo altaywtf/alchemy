@@ -333,18 +333,17 @@ export const deleteSnapshot = Effect.fn(function* (idOrName: string) {
  * deletes itself after an hour if this process dies first.
  */
 export const captureSnapshot = Effect.fn(function* (input: {
-  readonly id: string;
+  readonly labels: Record<string, string>;
   readonly name: string;
   readonly from: string;
   readonly run: readonly string[];
   readonly note: (message: string) => Effect.Effect<void>;
 }) {
-  const labels = yield* createInternalLabels(input.id);
   const build = yield* Effect.acquireRelease(
     sandboxes.createSandbox({
       name: `${input.name}-build`.slice(0, 63),
       snapshot: input.from,
-      labels: { ...labels, "alchemy.role": "snapshot-build" },
+      labels: { ...input.labels, "alchemy.role": "snapshot-build" },
       autoDeleteInterval: 60,
     }),
     (sandbox) =>
@@ -379,6 +378,68 @@ export const captureSnapshot = Effect.fn(function* (input: {
   yield* sandboxes.createSandboxSnapshot({ sandboxIdOrName: started.id, name: input.name });
   return yield* waitForSnapshot(input.name);
 }, Effect.scoped);
+
+/** A snapshot's source with every input resolved (Dockerfile as content). */
+export interface ResolvedSnapshotSource {
+  readonly image?: string | undefined;
+  readonly dockerfile?: string | undefined;
+  readonly from?: string | undefined;
+  readonly run?: readonly string[] | undefined;
+  readonly entrypoint?: string[] | undefined;
+  readonly cpu?: number | undefined;
+  readonly memory?: number | undefined;
+  readonly disk?: number | undefined;
+  readonly gpu?: number | undefined;
+  readonly gpuType?: GpuType[] | undefined;
+  readonly regionId?: string | undefined;
+  readonly sandboxClass?: snapshots.SandboxClass | undefined;
+}
+
+/**
+ * Build a snapshot named `name` and wait until it is active: pull or
+ * build on Daytona's builders, or capture it from a `from` sandbox after
+ * running `run`. Shared by the resource and the runtime binding.
+ */
+export const buildSnapshot = Effect.fn(function* (input: {
+  readonly name: string;
+  readonly source: ResolvedSnapshotSource;
+  readonly labels: Record<string, string>;
+  readonly note: (message: string) => Effect.Effect<void>;
+}) {
+  const { name, source } = input;
+  if (source.from !== undefined) {
+    return yield* captureSnapshot({
+      labels: input.labels,
+      name,
+      from: source.from,
+      run: source.run ?? [],
+      note: input.note,
+    });
+  }
+  if (source.image !== undefined) yield* checkImage(source.image);
+  yield* input.note(
+    source.dockerfile !== undefined
+      ? `Building snapshot ${name} on Daytona...`
+      : `Pulling ${source.image} into snapshot ${name}...`,
+  );
+  yield* snapshots
+    .createSnapshot({
+      name,
+      imageName: source.image,
+      buildInfo:
+        source.dockerfile !== undefined ? { dockerfileContent: source.dockerfile } : undefined,
+      entrypoint: source.entrypoint,
+      cpu: source.cpu,
+      memory: source.memory,
+      disk: source.disk,
+      gpu: source.gpu,
+      gpuType: source.gpuType,
+      regionId: source.regionId,
+      sandboxClass: source.sandboxClass,
+    })
+    .pipe(Effect.catchTag("SnapshotAlreadyExists", () => Effect.void));
+  return yield* waitForSnapshot(name);
+});
 
 export const SnapshotProvider = () =>
   Provider.effect(
@@ -426,40 +487,13 @@ export const SnapshotProvider = () =>
         }
 
         // Ensure
-        if (source.from !== undefined) {
-          const captured = yield* captureSnapshot({
-            id,
-            name,
-            from: source.from,
-            run: source.run,
-            note: session.note,
-          });
-          return toSnapshotAttributes(captured, source.buildHash);
-        }
-        yield* session.note(
-          source.dockerfile !== undefined
-            ? `Building snapshot ${name} on Daytona...`
-            : `Pulling ${source.image} into snapshot ${name}...`,
-        );
-        yield* snapshots
-          .createSnapshot({
-            name,
-            imageName: source.image,
-            buildInfo:
-              source.dockerfile !== undefined
-                ? { dockerfileContent: source.dockerfile }
-                : undefined,
-            entrypoint: source.entrypoint,
-            cpu: source.cpu,
-            memory: source.memory,
-            disk: source.disk,
-            gpu: source.gpu,
-            gpuType: source.gpuType,
-            regionId: source.regionId,
-            sandboxClass: source.sandboxClass,
-          })
-          .pipe(Effect.catchTag("SnapshotAlreadyExists", () => Effect.void));
-        return toSnapshotAttributes(yield* waitForSnapshot(name), source.buildHash);
+        const built = yield* buildSnapshot({
+          name,
+          source,
+          labels: yield* createInternalLabels(id),
+          note: session.note,
+        });
+        return toSnapshotAttributes(built, source.buildHash);
       }),
       delete: Effect.fn(function* ({ output }) {
         yield* deleteSnapshot(output.snapshotId);
