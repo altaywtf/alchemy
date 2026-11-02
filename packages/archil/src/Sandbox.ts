@@ -1,0 +1,331 @@
+import * as archil from "@distilled.cloud/archil";
+import { Unowned } from "alchemy/AdoptPolicy";
+import { deepEqual, isResolved } from "alchemy/Diff";
+import * as Provider from "alchemy/Provider";
+import { Resource } from "alchemy/Resource";
+import * as Effect from "effect/Effect";
+import type * as Redacted from "effect/Redacted";
+import {
+  findSandboxByName,
+  getSandbox,
+  isAlchemyName,
+  listSandboxes,
+  sandboxName,
+  waitForSandbox,
+  waitForSandboxGone,
+} from "./internal/archil.ts";
+import type { Providers } from "./Providers.ts";
+import {
+  egressIdentity,
+  toEgressPolicy,
+  toEnv,
+  toSandboxMount,
+  type SandboxEgress,
+  type SandboxEndpoint,
+  type SandboxMount,
+} from "./SandboxOptions.ts";
+
+export interface SandboxProps {
+  /**
+   * Sandbox name, unique within your account: lowercase letters, digits
+   * and `-`, at most 63 characters. If omitted, a unique name is generated
+   * from the stack, stage, and logical ID. Changing it replaces the sandbox.
+   */
+  name?: string;
+  /**
+   * Image id from an {@link Image} (e.g. `image.imageId`), for a private
+   * image or a pinned digest. Exclusive with `baseImage`. Changing it
+   * replaces the sandbox.
+   */
+  image?: string;
+  /**
+   * Public OCI image reference with a `linux/amd64` manifest. Exclusive
+   * with `image`. Changing it replaces the sandbox.
+   * @default "node:24-bookworm"
+   */
+  baseImage?: string;
+  /** vCPUs, 1–32. Changing it replaces the sandbox. @default 1 */
+  vcpuCount?: number;
+  /** Memory in MiB, 256–65536. Changing it replaces the sandbox. @default 2048 */
+  memSizeMiB?: number;
+  /** TCP ports to serve publicly. Updated in place. */
+  ports?: number[];
+  /**
+   * Let services inside the sandbox publish their own ingress.
+   * Changing it replaces the sandbox. @default false
+   */
+  enableServiceIngress?: boolean;
+  /** Environment for the sandbox's processes. Changing it replaces the sandbox. */
+  env?: Record<string, string | Redacted.Redacted<string>>;
+  /** Outbound network policy. Updated in place. */
+  network?: { egress?: SandboxEgress };
+  /** Disks to mount. Changing them replaces the sandbox. */
+  mounts?: SandboxMount[];
+  /**
+   * Seconds a powered-on session may run before the sandbox pauses
+   * (at most 24 hours). Changing it replaces the sandbox.
+   */
+  maxTtlSeconds?: number;
+  /**
+   * Seconds without a process connection before the sandbox pauses.
+   * `0` disables idle expiry. Updated in place.
+   */
+  idleTtlSeconds?: number;
+  /** Concurrent processes allowed. Changing it replaces the sandbox. */
+  maxConcurrentExecs?: number;
+}
+
+export interface SandboxAttributes {
+  /** Sandbox id. */
+  sandboxId: string;
+  /** Sandbox name. */
+  name: string;
+  /** Lifecycle state when last observed, e.g. `running` or `paused`. */
+  status: string;
+  /** The image reference the sandbox boots. */
+  baseImage: string;
+  /** Digest of the booted image. */
+  imageDigest: string | undefined;
+  vcpuCount: number;
+  memSizeMiB: number;
+  /** Public hostnames of the exposed ports. */
+  endpoints: SandboxEndpoint[];
+  /** `https://` URL of the first exposed port, if any. */
+  url: string | undefined;
+}
+
+export type Sandbox = Resource<"Archil.Sandbox", SandboxProps, SandboxAttributes, never, Providers>;
+
+/**
+ * A long-lived Archil sandbox: a Firecracker microVM with disks mounted,
+ * public ports, and an outbound network policy that can inject credentials
+ * at the boundary. It pauses when idle and resumes on the next connection,
+ * keeping its memory.
+ *
+ * Declare a sandbox at deploy time for a dev box or a preview environment
+ * that outlives deploys. Short-lived sandboxes for one user or task are
+ * created at run time with {@link CreateSandbox}; act on a declared one with
+ * {@link ConnectSandbox}.
+ * @see https://docs.archil.com/compute/sandboxes/introduction
+ *
+ * ### Creating a Sandbox
+ * **Example:** A dev box with a disk mounted
+ * ```typescript
+ * export const DevBox = Archil.Sandbox("DevBox", {
+ *   baseImage: "node:24-bookworm",
+ *   vcpuCount: 2,
+ *   memSizeMiB: 4096,
+ *   mounts: [{ disk: Workspace.diskId, path: "/workspace" }],
+ *   ports: [3000],
+ *   idleTtlSeconds: 600,
+ * });
+ * ```
+ *
+ * ### Network Policy
+ * **Example:** Deny by default, inject a token for one API
+ * ```typescript
+ * export const Agent = Archil.Sandbox("Agent", {
+ *   network: {
+ *     egress: {
+ *       default: "deny",
+ *       allow: [
+ *         "registry.npmjs.org",
+ *         { target: "api.github.com", headers: { Authorization: Alchemy.Secret("GITHUB_AUTH") } },
+ *       ],
+ *     },
+ *   },
+ * });
+ * ```
+ *
+ * ### Using a Sandbox at Run Time
+ * **Example:** Run a command and share a port from a Worker
+ * ```typescript
+ * const preview = yield* Archil.ConnectSandbox(Preview);
+ * const result = yield* preview.exec("pnpm build");
+ * const fork = yield* preview.fork({ name: "pr-42" });
+ * ```
+ *
+ * @resource
+ * @product Sandbox
+ */
+export const Sandbox = Resource<Sandbox>("Archil.Sandbox");
+
+/** Map a sandbox response to attributes. */
+export const toSandboxAttributes = (sandbox: archil.Sandbox): SandboxAttributes => {
+  const endpoints = (sandbox.endpoints ?? []).map((e) => ({ port: e.port, hostname: e.hostname }));
+  return {
+    sandboxId: sandbox.sandbox_id,
+    name: sandbox.name,
+    status: sandbox.status,
+    baseImage: sandbox.base_image,
+    imageDigest: sandbox.image_digest,
+    vcpuCount: sandbox.vcpu_count,
+    memSizeMiB: sandbox.mem_size_mib,
+    endpoints,
+    url: endpoints[0] ? `https://${endpoints[0].hostname}` : undefined,
+  };
+};
+
+/** The create request for sandbox props. */
+export const toCreateSandboxRequest = (
+  name: string | undefined,
+  props: Omit<SandboxProps, "name">,
+): archil.CreateSandboxRequest => ({
+  wait: true,
+  name,
+  image_id: props.image,
+  base_image: props.image ? undefined : props.baseImage,
+  vcpu_count: props.vcpuCount,
+  mem_size_mib: props.memSizeMiB,
+  ports: props.ports,
+  enable_service_ingress: props.enableServiceIngress,
+  env: toEnv(props.env),
+  network: props.network?.egress ? { egress: toEgressPolicy(props.network.egress) } : undefined,
+  mounts: props.mounts?.map(toSandboxMount),
+  max_ttl_seconds: props.maxTtlSeconds,
+  idle_ttl_seconds: props.idleTtlSeconds,
+  max_concurrent_execs: props.maxConcurrentExecs,
+});
+
+/** Delete a sandbox and wait until it is gone. Deleting a missing sandbox succeeds. */
+export const deleteSandbox = Effect.fn(function* (sid: string) {
+  const request = archil.deleteSandbox({ sid }).pipe(
+    Effect.asVoid,
+    Effect.catchTag("SandboxNotFound", () => Effect.void),
+  );
+  // A sandbox mid-transition can't be deleted yet; let it settle first.
+  yield* request.pipe(
+    Effect.catchTag("SandboxStateConflict", () =>
+      waitForSandbox(sid).pipe(
+        Effect.catchTag("SandboxNotFound", () => Effect.undefined),
+        Effect.andThen(request),
+      ),
+    ),
+  );
+  yield* waitForSandboxGone(sid);
+});
+
+/** Converge a sandbox's exposed ports. */
+const syncPorts = Effect.fn(function* (sid: string, desired: number[] | undefined) {
+  if (desired === undefined) return;
+  const { data } = yield* archil.listSandboxPorts({ sid });
+  const observed = new Set((data.ports ?? []).map((p) => p.port));
+  const want = new Set(desired);
+  for (const port of want) {
+    if (!observed.has(port)) yield* archil.exposeSandboxPort({ sid, port });
+  }
+  for (const port of observed) {
+    if (!want.has(port)) yield* archil.deleteSandboxPort({ sid, port });
+  }
+});
+
+/** Converge a sandbox's egress policy. */
+const syncNetwork = Effect.fn(function* (sid: string, egress: SandboxEgress | undefined) {
+  if (egress === undefined) return;
+  const desired = toEgressPolicy(egress);
+  const { data } = yield* archil.getSandboxNetwork({ sid });
+  if (!deepEqual(data.egress, desired)) {
+    yield* archil.updateSandboxNetwork({ sid, egress: desired });
+  }
+});
+
+/** Props that can't change on a running sandbox. */
+const createOnly = (props: SandboxProps | undefined) => ({
+  image: props?.image,
+  baseImage: props?.baseImage,
+  vcpuCount: props?.vcpuCount,
+  memSizeMiB: props?.memSizeMiB,
+  enableServiceIngress: props?.enableServiceIngress,
+  env: toEnv(props?.env),
+  mounts: props?.mounts,
+  maxTtlSeconds: props?.maxTtlSeconds,
+  maxConcurrentExecs: props?.maxConcurrentExecs,
+});
+
+export const SandboxProvider = () =>
+  Provider.effect(
+    Sandbox,
+    Effect.gen(function* () {
+      return {
+        stables: ["sandboxId", "name"],
+        nuke: { dependsOn: ["Archil.Disk"] },
+        list: Effect.fn(function* () {
+          return (yield* listSandboxes())
+            .filter((s) => isAlchemyName(s.name) && s.status !== "deleted")
+            .map(toSandboxAttributes);
+        }),
+        diff: Effect.fn(function* ({ id, olds, news, output }) {
+          if (!isResolved(news)) return undefined;
+          const name = output?.name ?? (yield* sandboxName(id, olds?.name));
+          if (news.name !== undefined && news.name !== name) {
+            return { action: "replace" } as const;
+          }
+          if (olds !== undefined && !deepEqual(createOnly(news), createOnly(olds))) {
+            return { action: "replace" } as const;
+          }
+          if (
+            !deepEqual(egressIdentity(news.network?.egress), egressIdentity(olds?.network?.egress))
+          ) {
+            return { action: "update" } as const;
+          }
+          return undefined;
+        }),
+        read: Effect.fn(function* ({ id, olds, output }) {
+          const name = output?.name ?? (yield* sandboxName(id, olds?.name));
+          const sandbox =
+            (output ? yield* getSandbox(output.sandboxId) : undefined) ??
+            (yield* findSandboxByName(name));
+          if (!sandbox) return undefined;
+          const attrs = toSandboxAttributes(sandbox);
+          if (output === undefined && olds?.name !== undefined && !isAlchemyName(sandbox.name)) {
+            return Unowned(attrs);
+          }
+          return attrs;
+        }),
+        reconcile: Effect.fn(function* ({ id, news, output, session }) {
+          const name = output?.name ?? (yield* sandboxName(id, news.name));
+          // Observe
+          let sandbox =
+            (output ? yield* getSandbox(output.sandboxId) : undefined) ??
+            (yield* findSandboxByName(name));
+          // Ensure
+          if (!sandbox) {
+            yield* session.note(`Creating sandbox ${name}...`);
+            sandbox = yield* archil.createSandbox(toCreateSandboxRequest(name, news)).pipe(
+              Effect.map(({ data }) => data),
+              Effect.catchTag("SandboxAlreadyExists", () =>
+                findSandboxByName(name).pipe(
+                  Effect.flatMap((found) =>
+                    found
+                      ? Effect.succeed(found)
+                      : Effect.fail(
+                          new archil.SandboxAlreadyExists({
+                            error: `Sandbox ${name} exists but is not visible to this key`,
+                          }),
+                        ),
+                  ),
+                ),
+              ),
+            );
+          }
+          const sid = sandbox.sandbox_id;
+          sandbox = yield* waitForSandbox(sid);
+          // Sync
+          yield* syncNetwork(sid, news.network?.egress);
+          yield* syncPorts(sid, news.ports);
+          if (
+            news.idleTtlSeconds !== undefined &&
+            news.idleTtlSeconds !== sandbox.idle_ttl_seconds
+          ) {
+            yield* archil.setSandboxTimeout({ sid, idle_ttl_seconds: news.idleTtlSeconds });
+          }
+          // Return
+          const final = yield* getSandbox(sid);
+          return toSandboxAttributes(final ?? sandbox);
+        }),
+        delete: Effect.fn(function* ({ output }) {
+          yield* deleteSandbox(output.sandboxId);
+        }),
+      };
+    }),
+  );
