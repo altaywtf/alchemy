@@ -1,0 +1,76 @@
+import * as Binding from "alchemy/Binding";
+import type { RuntimeContext } from "alchemy/RuntimeContext";
+import type * as Effect from "effect/Effect";
+import type { DictAttributes } from "./Dict.ts";
+import type { ReadWriteDictClient } from "./DictClient.ts";
+import type { Environment } from "./Environment.ts";
+
+/** A dict created or found at runtime: its attributes plus a read-write client. */
+export interface DictHandle extends ReadWriteDictClient {
+  readonly dictId: Effect.Effect<string>;
+  readonly name: string;
+  /** The attributes, to pass where a `Modal.Dict` is accepted (e.g. sandbox mounts). */
+  readonly attributes: DictAttributes;
+}
+
+/** Get, create, list and delete dicts by name in one environment. */
+export interface DictsClient {
+  /** The dict named `name`, created when missing (Modal's own get-or-create). */
+  getOrCreate(name: string): Effect.Effect<DictHandle, any>;
+  /** The dict named `name`, or `undefined`. */
+  get(name: string): Effect.Effect<DictHandle | undefined, any>;
+  /** Delete the dict named `name` (no-op when missing). */
+  delete(name: string): Effect.Effect<void, any>;
+  /** Names of every dict in the environment. */
+  list(): Effect.Effect<ReadonlyArray<string>, any>;
+}
+
+/**
+ * Create dicts by name at runtime: one per user, session or task.
+ * Modal's native shape is get-or-create by name, so `getOrCreate` is
+ * idempotent and safe to call on every request.
+ *
+ * Bind it to a `Modal.Environment` to keep these runtime objects in their
+ * own namespace (or to nothing, for the workspace's default environment).
+ * They aren't in Alchemy state: deleting the environment removes them.
+ *
+ * ### One dict per user
+ * **Example:** From a Cloudflare Worker
+ * ```typescript
+ * import * as Cloudflare from "@alchemy.run/cloudflare";
+ * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
+ * import * as Layer from "effect/Layer";
+ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
+ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ * import { Agents, Coder } from "./Coder.ts";
+ *
+ * export default class Api extends Cloudflare.Worker<Api>()(
+ *   "Api",
+ *   { main: import.meta.url },
+ *   Effect.gen(function* () {
+ *     const dicts = yield* Modal.CreateDict(Agents);
+ *     const sandboxes = yield* Modal.CreateSandbox(Coder);
+ *     return {
+ *       fetch: Effect.gen(function* () {
+ *         const request = yield* HttpServerRequest;
+ *         const user = request.headers["x-user"] ?? "anonymous";
+ *         const state = yield* dicts.getOrCreate(`state-${user}`);
+ *         yield* state.put("lastSeen", Date.now());
+ *         return HttpServerResponse.text("ok");
+ *       }).pipe(Effect.orDie),
+ *     };
+ *   }).pipe(Effect.provide(Layer.mergeAll(Modal.CreateDictHttp, Modal.CreateSandboxHttp))),
+ * ) {}
+ * ```
+ *
+ * @binding
+ * @product Dict
+ */
+export interface CreateDict extends Binding.Service<
+  CreateDict,
+  "Modal.CreateDict",
+  (environment?: Environment) => Effect.Effect<DictsClient, never, RuntimeContext>
+> {}
+
+export const CreateDict = Binding.Service<CreateDict>("Modal.CreateDict");

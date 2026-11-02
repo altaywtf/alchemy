@@ -1,0 +1,55 @@
+import { ConfigError } from "@distilled.cloud/core/errors";
+import { Credentials, DEFAULT_API_BASE_URL } from "@distilled.cloud/modal/Credentials";
+import { lazyCredentials } from "alchemy/Auth/Resolve";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
+import { MODAL_AUTH_PROVIDER_NAME, type ModalResolvedCredentials } from "./AuthProvider.ts";
+
+export {
+  Credentials,
+  CredentialsFromEnv,
+  DEFAULT_API_BASE_URL,
+} from "@distilled.cloud/modal/Credentials";
+
+/**
+ * Build Modal `Credentials` that resolve through the Alchemy AuthProvider:
+ * `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` when set, otherwise the selected
+ * profile. Resolution is deferred until the first API call, so building the
+ * provider layers never needs a profile.
+ */
+export const fromAuthProvider = () =>
+  Layer.effect(
+    Credentials,
+    lazyCredentials<ModalResolvedCredentials, ConfigError>()(MODAL_AUTH_PROVIDER_NAME, (creds) => ({
+      tokenId: creds.tokenId,
+      tokenSecret: creds.tokenSecret,
+      apiBaseUrl: creds.apiBaseUrl,
+    })),
+  );
+
+/**
+ * Build Modal `Credentials` from an explicit token pair, e.g. in a test or a
+ * script that already holds one.
+ *
+ * @example
+ * ```ts
+ * Effect.provide(Modal.fromToken({ tokenId: "ak-…", tokenSecret: "as-…" }))
+ * ```
+ */
+export const fromToken = (input: {
+  tokenId: string | Redacted.Redacted<string>;
+  tokenSecret: string | Redacted.Redacted<string>;
+  apiBaseUrl?: string;
+}): Layer.Layer<Credentials> =>
+  Layer.succeed(
+    Credentials,
+    Effect.succeed({
+      tokenId: typeof input.tokenId === "string" ? Redacted.make(input.tokenId) : input.tokenId,
+      tokenSecret:
+        typeof input.tokenSecret === "string"
+          ? Redacted.make(input.tokenSecret)
+          : input.tokenSecret,
+      apiBaseUrl: input.apiBaseUrl ?? DEFAULT_API_BASE_URL,
+    }),
+  );

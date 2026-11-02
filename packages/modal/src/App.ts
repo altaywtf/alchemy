@@ -1,0 +1,218 @@
+import * as app from "@distilled.cloud/modal/app";
+import { Unowned } from "alchemy/AdoptPolicy";
+import { deepEqual, isResolved } from "alchemy/Diff";
+import * as Provider from "alchemy/Provider";
+import { Resource } from "alchemy/Resource";
+import { createInternalTags, hasAlchemyTags } from "alchemy/Tags";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import {
+  type EnvironmentInput,
+  envNameOf,
+  environmentNames,
+  environmentOf,
+  objectName,
+  stringMap,
+} from "./internal.ts";
+import type { Providers } from "./Providers.ts";
+
+export class AppUnexpectedResponse extends Data.TaggedError("Modal.AppUnexpectedResponse")<{
+  readonly message: string;
+}> {}
+
+export interface AppProps {
+  /**
+   * App name, unique per environment. If omitted, a unique name is generated
+   * from the stack, stage and logical ID. Changing it replaces the app.
+   */
+  name?: string;
+  /**
+   * Environment the app lives in. Changing it replaces the app.
+   * @default the workspace's default environment
+   */
+  environment?: EnvironmentInput;
+  /**
+   * Key-value metadata on the app, shown in the Modal dashboard and usable
+   * for filtering. Alchemy adds its own `alchemy::*` ownership tags.
+   */
+  tags?: Record<string, string>;
+}
+
+export interface AppAttributes {
+  /** App ID (`ap-…`). */
+  appId: string;
+  /** App name. */
+  name: string;
+  /** Environment name, or `undefined` for the workspace default. */
+  environment: string | undefined;
+  /** Tags on the app, including Alchemy's ownership tags. */
+  tags: Record<string, string>;
+}
+
+/**
+ * A Modal App: the named, persistent namespace that Sandboxes, Images and
+ * Functions run under. Every Sandbox belongs to an App, and stopping the App
+ * terminates its Sandboxes.
+ *
+ * An App deployed with Modal's Python client (`modal deploy`) can also be
+ * referenced by name from {@link InvokeFunction} and
+ * {@link FunctionAutoscaler}; this resource is for apps Alchemy owns, such as
+ * the home of an agent's sandboxes.
+ *
+ * ### Creating an App
+ * **Example:** An app for sandboxes
+ * ```typescript
+ * import * as Modal from "@alchemy.run/modal";
+ *
+ * export const Coder = Modal.App("Coder", {});
+ * ```
+ *
+ * **Example:** A named, tagged app in an environment
+ * ```typescript
+ * import * as Modal from "@alchemy.run/modal";
+ *
+ * export const Agents = Modal.Environment("Agents", {});
+ * export const Coder = Modal.App("Coder", {
+ *   name: "coder",
+ *   environment: Agents,
+ *   tags: { team: "platform" },
+ * });
+ * ```
+ *
+ * ### Running sandboxes in it
+ * **Example:** Create sandboxes from a Worker
+ * ```typescript
+ * import * as Cloudflare from "@alchemy.run/cloudflare";
+ * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
+ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ * import { Coder } from "./Coder.ts";
+ *
+ * export default class Api extends Cloudflare.Worker<Api>()(
+ *   "Api",
+ *   { main: import.meta.url },
+ *   Effect.gen(function* () {
+ *     const sandboxes = yield* Modal.CreateSandbox(Coder);
+ *     return {
+ *       fetch: Effect.gen(function* () {
+ *         const sandbox = yield* sandboxes.create({ image: "node:22-slim" });
+ *         const result = yield* sandbox.exec(["node", "--version"]);
+ *         yield* sandbox.terminate();
+ *         return HttpServerResponse.text(result.stdout);
+ *       }).pipe(Effect.orDie),
+ *     };
+ *   }).pipe(Effect.provide(Modal.CreateSandboxHttp)),
+ * ) {}
+ * ```
+ *
+ * @resource
+ * @product App
+ */
+export const App = Resource<App>("Modal.App");
+
+export type App = Resource<"Modal.App", AppProps, AppAttributes, never, Providers>;
+
+const isStopped = (state: string | undefined) =>
+  state === "APP_STATE_STOPPED" || state === "APP_STATE_STOPPING";
+
+export const AppProvider = () =>
+  Provider.effect(
+    App,
+    Effect.gen(function* () {
+      const observe = Effect.fn(function* (name: string, env: string | undefined) {
+        const found = yield* app
+          .lookupApp({ appName: name, environmentName: environmentOf(env) })
+          .pipe(Effect.catchTag("AppNotFound", () => Effect.undefined));
+        if (!found?.appId) return undefined;
+        const { tags } = yield* app
+          .appGetTags({ appId: found.appId })
+          .pipe(Effect.catchTag("AppNotFound", () => Effect.succeed({ tags: undefined })));
+        return {
+          appId: found.appId,
+          name,
+          environment: env,
+          tags: stringMap(tags),
+        } satisfies AppAttributes;
+      });
+
+      return {
+        stables: ["appId", "name", "environment"],
+        diff: Effect.fn(function* ({ id, news, olds, output }) {
+          if (!isResolved(news)) return undefined;
+          if (envNameOf(news.environment) !== envNameOf(olds?.environment))
+            return { action: "replace" } as const;
+          const name = yield* objectName(id, news.name);
+          if (output !== undefined && name !== output.name) return { action: "replace" } as const;
+          return undefined;
+        }),
+        read: Effect.fn(function* ({ id, olds, output }) {
+          const name = output?.name ?? (yield* objectName(id, olds?.name));
+          const observed = yield* observe(
+            name,
+            output?.environment ?? envNameOf(olds?.environment),
+          );
+          if (!observed) return undefined;
+          const ours = yield* hasAlchemyTags(id, observed.tags);
+          return ours ? observed : Unowned(observed);
+        }),
+        reconcile: Effect.fn(function* ({ id, news, output, session }) {
+          const name = output?.name ?? (yield* objectName(id, news.name));
+          // Observe + ensure: get-or-create is idempotent under races.
+          let current = yield* observe(name, envNameOf(news.environment));
+          if (!current) {
+            yield* session.note(`Creating app ${name}...`);
+            const created = yield* app.appGetOrCreate({
+              appName: name,
+              environmentName: environmentOf(envNameOf(news.environment)),
+              objectCreationType: "OBJECT_CREATION_TYPE_CREATE_IF_MISSING",
+            });
+            if (!created.appId) {
+              return yield* new AppUnexpectedResponse({
+                message: `Modal returned no id for app ${name}`,
+              });
+            }
+            current = {
+              appId: created.appId,
+              name,
+              environment: envNameOf(news.environment),
+              tags: {},
+            };
+          }
+          // Sync tags against the observed tags. Modal stores the map it is
+          // given; it has no per-key delete.
+          const desired = { ...news.tags, ...(yield* createInternalTags(id)) };
+          if (!deepEqual(current.tags, desired)) {
+            yield* app.appSetTags({ appId: current.appId, tags: desired });
+            current = { ...current, tags: desired };
+          }
+          return current;
+        }),
+        delete: Effect.fn(function* ({ output }) {
+          yield* app
+            .stopApp({ appId: output.appId, source: "APP_STOP_SOURCE_CLI" })
+            .pipe(Effect.catchTag("AppNotFound", () => Effect.void));
+        }),
+        list: Effect.fn(function* () {
+          const envs = yield* environmentNames;
+          const all: AppAttributes[] = [];
+          for (const env of envs) {
+            const { apps } = yield* app.listApp({ environmentName: env });
+            for (const item of apps ?? []) {
+              if (!item.appId || isStopped(item.state)) continue;
+              const { tags } = yield* app
+                .appGetTags({ appId: item.appId })
+                .pipe(Effect.catchTag("AppNotFound", () => Effect.succeed({ tags: undefined })));
+              if (!Object.keys(tags ?? {}).some((key) => key.startsWith("alchemy::"))) continue;
+              all.push({
+                appId: item.appId,
+                name: item.name ?? item.description ?? "",
+                environment: env,
+                tags: stringMap(tags),
+              });
+            }
+          }
+          return all;
+        }),
+      };
+    }),
+  );

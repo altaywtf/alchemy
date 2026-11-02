@@ -1,0 +1,75 @@
+import { CredentialsStoreLive } from "alchemy/Auth/Credentials";
+import { ProfileStoreLive } from "alchemy/Auth/Profile";
+import * as Provider from "alchemy/Provider";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as Layer from "effect/Layer";
+import { App, AppProvider } from "./App.ts";
+import { ModalAuth } from "./AuthProvider.ts";
+import * as Credentials from "./Credentials.ts";
+import { Dict, DictProvider } from "./Dict.ts";
+import { Environment, EnvironmentProvider } from "./Environment.ts";
+import { FunctionAutoscaler, FunctionAutoscalerProvider } from "./FunctionAutoscaler.ts";
+import { Image, ImageProvider } from "./Image.ts";
+import { Proxy, ProxyProvider } from "./Proxy.ts";
+import { Queue, QueueProvider } from "./Queue.ts";
+import { Secret, SecretProvider } from "./Secret.ts";
+import { Volume, VolumeProvider } from "./Volume.ts";
+import { WebhookToken, WebhookTokenProvider } from "./WebhookToken.ts";
+import { WorkspaceSettings, WorkspaceSettingsProvider } from "./WorkspaceSettings.ts";
+
+/**
+ * Service tag bundling every Modal provider + auth + credentials. Use
+ * `Modal.providers()` to materialize the full layer.
+ */
+export class Providers extends Provider.ProviderCollection<Providers>()("Modal") {}
+
+export type ProviderRequirements = Layer.Services<ReturnType<typeof providers>>;
+
+/**
+ * Every Modal resource provider, the Modal AuthProvider registration (so
+ * `alchemy profile edit` can configure it), and credential resolution.
+ *
+ * @example
+ * ```ts
+ * Alchemy.Stack("App", { providers: Modal.providers() }, ...)
+ * ```
+ */
+export const providers = () =>
+  Layer.effect(
+    Providers,
+    Provider.collection([
+      App,
+      Dict,
+      Environment,
+      FunctionAutoscaler,
+      Image,
+      Proxy,
+      Queue,
+      Secret,
+      Volume,
+      WebhookToken,
+      WorkspaceSettings,
+    ]),
+  ).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        AppProvider(),
+        DictProvider(),
+        EnvironmentProvider(),
+        FunctionAutoscalerProvider(),
+        ImageProvider(),
+        ProxyProvider(),
+        QueueProvider(),
+        SecretProvider(),
+        VolumeProvider(),
+        WebhookTokenProvider(),
+        WorkspaceSettingsProvider(),
+      ),
+    ),
+    Layer.provideMerge(Credentials.fromAuthProvider()),
+    Layer.provideMerge(FetchHttpClient.layer),
+    Layer.provideMerge(ModalAuth),
+    Layer.provideMerge(ProfileStoreLive),
+    Layer.provideMerge(CredentialsStoreLive),
+    Layer.orDie,
+  );

@@ -1,0 +1,84 @@
+import * as Binding from "alchemy/Binding";
+import type { RuntimeContext } from "alchemy/RuntimeContext";
+import type * as Effect from "effect/Effect";
+import type * as Redacted from "effect/Redacted";
+import type { Environment } from "./Environment.ts";
+import type { SecretAttributes } from "./Secret.ts";
+
+/** Write, find, list and delete secrets by name in one environment. */
+export interface SecretsClient {
+  /**
+   * Create or overwrite the secret named `name` with `env`. Returns its
+   * attributes, to pass as a sandbox `secrets` entry or in an outbound
+   * header replacement.
+   */
+  put(
+    name: string,
+    env: Record<string, string | Redacted.Redacted<string>>,
+  ): Effect.Effect<SecretAttributes, any>;
+  /** The secret named `name` (its variable names, never its values), or `undefined`. */
+  get(name: string): Effect.Effect<SecretAttributes | undefined, any>;
+  /** Delete the secret named `name` (no-op when missing). */
+  delete(name: string): Effect.Effect<void, any>;
+  /** Names of every secret in the environment. */
+  list(): Effect.Effect<ReadonlyArray<string>, any>;
+}
+
+/**
+ * Store secrets by name at runtime, such as one per user, and hand them to
+ * that user's sandboxes. With an outbound header replacement the sandbox
+ * never sees the value: Modal adds it to matching requests on the way out.
+ *
+ * Bind it to a `Modal.Environment` to keep these runtime secrets in their
+ * own namespace. They aren't in Alchemy state: deleting the environment
+ * removes them.
+ *
+ * ### A user's token, injected at egress
+ * **Example:** From a Cloudflare Worker
+ * ```typescript
+ * import * as Cloudflare from "@alchemy.run/cloudflare";
+ * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
+ * import * as Layer from "effect/Layer";
+ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
+ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ * import { Agents, Coder } from "./Coder.ts";
+ *
+ * export default class Api extends Cloudflare.Worker<Api>()(
+ *   "Api",
+ *   { main: import.meta.url },
+ *   Effect.gen(function* () {
+ *     const secrets = yield* Modal.CreateSecret(Agents);
+ *     const sandboxes = yield* Modal.CreateSandbox(Coder);
+ *     return {
+ *       fetch: Effect.gen(function* () {
+ *         const request = yield* HttpServerRequest;
+ *         const user = request.headers["x-user"] ?? "anonymous";
+ *         const github = yield* secrets.put(`github-${user}`, {
+ *           GITHUB_TOKEN: request.headers["x-github-token"] ?? "",
+ *         });
+ *         const sandbox = yield* sandboxes.create({
+ *           allowedDomains: ["api.github.com", "github.com"],
+ *           outboundPolicy: {
+ *             headerReplacements: [
+ *               { domain: "api.github.com", secret: github, headers: { Authorization: "Bearer {GITHUB_TOKEN}" } },
+ *             ],
+ *           },
+ *         });
+ *         return HttpServerResponse.text(sandbox.sandboxId);
+ *       }).pipe(Effect.orDie),
+ *     };
+ *   }).pipe(Effect.provide(Layer.mergeAll(Modal.CreateSecretHttp, Modal.CreateSandboxHttp))),
+ * ) {}
+ * ```
+ *
+ * @binding
+ * @product Secret
+ */
+export interface CreateSecret extends Binding.Service<
+  CreateSecret,
+  "Modal.CreateSecret",
+  (environment?: Environment) => Effect.Effect<SecretsClient, never, RuntimeContext>
+> {}
+
+export const CreateSecret = Binding.Service<CreateSecret>("Modal.CreateSecret");
