@@ -58,10 +58,16 @@ export interface SecretsClient {
  *           GITHUB_TOKEN: request.headers["x-github-token"] ?? "",
  *         });
  *         const sandbox = yield* sandboxes.create({
- *           allowedDomains: ["api.github.com", "github.com"],
  *           outboundPolicy: {
- *             headerReplacements: [
- *               { domain: "api.github.com", secret: github, headers: { Authorization: "Bearer {GITHUB_TOKEN}" } },
+ *             routes: [
+ *               {
+ *                 https: {
+ *                   domains: ["api.github.com"],
+ *                   headerReplacements: [{ secret: github, headers: { Authorization: "Bearer $GITHUB_TOKEN" } }],
+ *                 },
+ *               },
+ *               { tls: { domains: ["github.com"] } },
+ *               { any: { redirect: "block" } },
  *             ],
  *           },
  *         });

@@ -29,6 +29,8 @@ export interface ImageBuildSpec {
    */
   readonly commands: ReadonlyArray<string>;
   readonly contextFiles?: ReadonlyArray<{ readonly filename: string; readonly data: Uint8Array }>;
+  /** A mount whose files the commands `COPY` (e.g. Modal's standalone Python). */
+  readonly contextMountId?: string;
   /** Build arguments (`ARG` values). */
   readonly buildArgs?: Readonly<Record<string, string>>;
   /** Secrets (ids) the build steps see as environment variables. */
@@ -87,6 +89,7 @@ export const buildImage = Effect.fn(function* (
       baseImages: from.baseImages,
       dockerfileCommands: [...from.first, ...spec.commands],
       contextFiles,
+      contextMountId: spec.contextMountId,
       secretIds: spec.secretIds ? [...spec.secretIds] : undefined,
       imageRegistryConfig: spec.registry
         ? { registryAuthType: AUTH_TYPE[spec.registry.authType], secretId: spec.registry.secretId }

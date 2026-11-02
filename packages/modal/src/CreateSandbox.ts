@@ -99,10 +99,15 @@ export interface SandboxesClient {
  * **Example:** Inject an API key into outbound requests
  * ```typescript
  * const sandbox = yield* sandboxes.create({
- *   allowedDomains: ["api.openai.com"],
  *   outboundPolicy: {
- *     headerReplacements: [
- *       { domain: "api.openai.com", secret: openai, headers: { Authorization: "Bearer {OPENAI_API_KEY}" } },
+ *     routes: [
+ *       {
+ *         https: {
+ *           domains: ["api.openai.com"],
+ *           headerReplacements: [{ secret: openai, headers: { Authorization: "Bearer $OPENAI_API_KEY" } }],
+ *         },
+ *       },
+ *       { any: { redirect: "block" } },
  *     ],
  *   },
  * });

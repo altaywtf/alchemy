@@ -88,8 +88,14 @@ export interface SecretAttributes {
  * ```typescript
  * const sandbox = yield* sandboxes.create({
  *   outboundPolicy: {
- *     headerReplacements: [
- *       { domain: "api.openai.com", secret: openai, headers: { Authorization: "Bearer {OPENAI_API_KEY}" } },
+ *     routes: [
+ *       {
+ *         https: {
+ *           domains: ["api.openai.com"],
+ *           headerReplacements: [{ secret: openai, headers: { Authorization: "Bearer $OPENAI_API_KEY" } }],
+ *         },
+ *       },
+ *       { any: {} },
  *     ],
  *   },
  * });

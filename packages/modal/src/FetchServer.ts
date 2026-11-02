@@ -1,0 +1,62 @@
+import * as Binding from "alchemy/Binding";
+import type { RuntimeContext } from "alchemy/RuntimeContext";
+import type * as Effect from "effect/Effect";
+import type * as HttpClientRequest from "effect/http/HttpClientRequest";
+import type * as HttpClientResponse from "effect/http/HttpClientResponse";
+import type { Function } from "./Function.ts";
+import type { Server } from "./Server.ts";
+
+/** Send requests to a deployed Modal Server or web Function. */
+export interface ServerClient {
+  /** The server's URL. */
+  readonly url: Effect.Effect<string, any, RuntimeContext>;
+  /**
+   * Send a request: its path and query are kept, the host is the server's,
+   * and Modal's proxy auth headers are added.
+   */
+  fetch(
+    request: HttpClientRequest.HttpClientRequest,
+  ): Effect.Effect<HttpClientResponse.HttpClientResponse, any, RuntimeContext>;
+}
+
+/**
+ * Call a `Modal.Server`, or a `Modal.Function` with `web`, from any
+ * runtime. Servers require Modal's proxy auth by default: the binding
+ * creates a `Modal.WebhookToken` for the host and sends its `Modal-Key` /
+ * `Modal-Secret` headers with every request.
+ *
+ * ### Call a Server
+ * **Example:** From a Cloudflare Worker
+ * ```typescript
+ * import * as Cloudflare from "@alchemy.run/cloudflare";
+ * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
+ * import * as HttpClientRequest from "effect/http/HttpClientRequest";
+ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ * import Api from "./Api.ts";
+ *
+ * export default class Gateway extends Cloudflare.Worker<Gateway>()(
+ *   "Gateway",
+ *   { main: import.meta.url },
+ *   Effect.gen(function* () {
+ *     const api = yield* Modal.FetchServer(Api);
+ *     return {
+ *       fetch: Effect.gen(function* () {
+ *         const response = yield* api.fetch(HttpClientRequest.get("/health"));
+ *         return HttpServerResponse.text(yield* response.text, { status: response.status });
+ *       }).pipe(Effect.orDie),
+ *     };
+ *   }).pipe(Effect.provide(Modal.FetchServerHttp)),
+ * ) {}
+ * ```
+ *
+ * @binding
+ * @product Server
+ */
+export interface FetchServer extends Binding.Service<
+  FetchServer,
+  "Modal.FetchServer",
+  (server: Server | Function) => Effect.Effect<ServerClient>
+> {}
+
+export const FetchServer = Binding.Service<FetchServer>("Modal.FetchServer");

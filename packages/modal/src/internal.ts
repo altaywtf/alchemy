@@ -106,3 +106,7 @@ export const envNameOf = (value: unknown): string | undefined =>
         typeof value.name === "string"
       ? value.name
       : undefined;
+
+/** A protobuf `Timestamp` (RFC 3339) for a `Date`, ISO string or epoch milliseconds. */
+export const timestampOf = (value: Date | string | number): string =>
+  typeof value === "string" ? value : new Date(value).toISOString();

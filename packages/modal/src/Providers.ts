@@ -10,12 +10,14 @@ import { Dict, DictProvider } from "./Dict.ts";
 import { Domain, DomainProvider } from "./Domain.ts";
 import { Endpoint, EndpointProvider } from "./Endpoint.ts";
 import { Environment, EnvironmentProvider } from "./Environment.ts";
+import { Function, FunctionProvider } from "./Function.ts";
 import { FunctionAutoscaler, FunctionAutoscalerProvider } from "./FunctionAutoscaler.ts";
 import { Image, ImageProvider } from "./Image.ts";
 import { Proxy, ProxyProvider } from "./Proxy.ts";
 import { Queue, QueueProvider } from "./Queue.ts";
 import { Sandbox, SandboxProvider } from "./Sandbox.ts";
 import { Secret, SecretProvider } from "./Secret.ts";
+import { Server, ServerProvider } from "./Server.ts";
 import { Volume, VolumeProvider } from "./Volume.ts";
 import { WebhookToken, WebhookTokenProvider } from "./WebhookToken.ts";
 import { WorkspaceSettings, WorkspaceSettingsProvider } from "./WorkspaceSettings.ts";
@@ -46,12 +48,14 @@ export const providers = () =>
       Domain,
       Endpoint,
       Environment,
+      Function,
       FunctionAutoscaler,
       Image,
       Proxy,
       Queue,
       Sandbox,
       Secret,
+      Server,
       Volume,
       WebhookToken,
       WorkspaceSettings,
@@ -64,12 +68,14 @@ export const providers = () =>
         DomainProvider(),
         EndpointProvider(),
         EnvironmentProvider(),
+        FunctionProvider(),
         FunctionAutoscalerProvider(),
         ImageProvider(),
         ProxyProvider(),
         QueueProvider(),
         SandboxProvider(),
         SecretProvider(),
+        ServerProvider(),
         VolumeProvider(),
         WebhookTokenProvider(),
         WorkspaceSettingsProvider(),

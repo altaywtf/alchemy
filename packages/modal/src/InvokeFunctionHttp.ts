@@ -1,142 +1,192 @@
 import * as functions from "@distilled.cloud/modal/functions";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { makeOpenModalBinding } from "./BindingHttp.ts";
+import { downloadBlob, MAX_INLINE_BYTES, uploadBlob } from "./Blob.ts";
 import { decodeCbor, encodeCbor } from "./Cbor.ts";
-import { environmentOf, seconds } from "./internal.ts";
+import { makeFunctionBinding, type ResolvedFunction } from "./FunctionTarget.ts";
+import { seconds } from "./internal.ts";
 import {
   FunctionCallFailed,
   FunctionCallTimeout,
   InvokeFunction,
+  type CallOptions,
   type FunctionClient,
-  type FunctionRef,
+  type FunctionTarget,
 } from "./InvokeFunction.ts";
 import type { ModalClient } from "./ModalBindings.ts";
 
-const encodeArgs = (args: ReadonlyArray<unknown>, kwargs: Record<string, unknown>) =>
-  Effect.try({
-    try: () => Buffer.from(encodeCbor([args, kwargs])).toString("base64"),
+/** One input: CBOR `[args, kwargs]`, inline or (over 2 MiB) as a blob. */
+const encodeInput = Effect.fn(function* (
+  args: ReadonlyArray<unknown>,
+  kwargs: Record<string, unknown>,
+  method: string | undefined,
+  final: boolean,
+  forceBlob = false,
+) {
+  const bytes = yield* Effect.try({
+    try: () => encodeCbor([args, kwargs]),
     catch: (cause) =>
       new FunctionCallFailed({
         status: "INVALID_ARGUMENTS",
         message: `Arguments aren't CBOR-encodable: ${String(cause)}`,
       }),
   });
+  const payload =
+    forceBlob || bytes.length > MAX_INLINE_BYTES
+      ? { argsBlobId: yield* uploadBlob(bytes) }
+      : { args: yield* Effect.sync(() => Buffer.from(bytes).toString("base64")) };
+  return {
+    ...payload,
+    dataFormat: "DATA_FORMAT_CBOR",
+    methodName: method,
+    finalInput: final,
+  } satisfies functions.FunctionInput;
+});
 
-const decodeResult = (data: string | undefined) =>
-  Effect.try({
-    try: () => (data ? decodeCbor(new Uint8Array(Buffer.from(data, "base64"))) : null),
+/** The value of a finished output, or its failure. */
+const decodeOutput = Effect.fn(function* (
+  functionCallId: string,
+  output: functions.GetFunctionOutputsItem,
+) {
+  const result = output.result;
+  if (result?.status !== "GENERIC_STATUS_SUCCESS") {
+    return yield* new FunctionCallFailed({
+      status: result?.status ?? "GENERIC_STATUS_UNSPECIFIED",
+      message: result?.exception || `Function call ${functionCallId} failed`,
+      traceback: result?.traceback,
+    });
+  }
+  const bytes = result.dataBlobId
+    ? yield* downloadBlob(result.dataBlobId)
+    : result.data
+      ? yield* Effect.sync(() => new Uint8Array(Buffer.from(result.data!, "base64")))
+      : undefined;
+  if (bytes === undefined) return null;
+  return yield* Effect.try({
+    try: () => decodeCbor(bytes),
     catch: (cause) =>
       new FunctionCallFailed({
         status: "INVALID_RESULT",
         message: `The result isn't CBOR (return plain values, or set the function's serialization): ${String(cause)}`,
       }),
   });
+});
 
-/** A function client over `ref`; the function id is looked up once, on first use. */
-export const makeFunctionClient = (ref: FunctionRef, client: ModalClient): FunctionClient => {
-  const [name, method] = ref.function.includes(".")
-    ? [`${ref.function.split(".")[0]}.*`, ref.function.split(".").slice(1).join(".")]
-    : [ref.function, undefined];
-  // Looked up on first use and kept: the id changes only when the app is redeployed.
-  let cachedId: string | undefined;
-  const functionId = Effect.suspend(() =>
-    cachedId !== undefined
-      ? Effect.succeed(cachedId)
-      : functions
-          .getFunction({
-            appName: ref.app,
-            objectTag: name,
-            environmentName: environmentOf(ref.environment),
-          })
-          .pipe(
-            Effect.map((response) => response.functionId ?? ""),
-            Effect.tap((id) => Effect.sync(() => (cachedId = id))),
-          ),
-  );
+/** Inputs per `FunctionMap`/`FunctionPutInputs` request. */
+const BATCH = 49;
 
-  const start = Effect.fn(function* (
-    args: ReadonlyArray<unknown>,
-    kwargs: Record<string, unknown>,
-    invocation: "FUNCTION_CALL_INVOCATION_TYPE_SYNC" | "FUNCTION_CALL_INVOCATION_TYPE_ASYNC",
-  ) {
-    const id = yield* functionId;
-    const encoded = yield* encodeArgs(args, kwargs);
-    const response = yield* functions.functionMap({
-      functionId: id,
-      functionCallType: "FUNCTION_CALL_TYPE_UNARY",
-      functionCallInvocationType: invocation,
-      returnExceptions: false,
-      pipelinedInputs: [
-        {
-          idx: 0,
-          input: {
-            args: encoded,
-            dataFormat: "DATA_FORMAT_CBOR",
-            methodName: method,
-            finalInput: true,
-          },
-        },
-      ],
-    });
-    return response.functionCallId ?? "";
-  });
+/** A client for a resolved function. */
+export const makeFunctionClient = (
+  resolved: ResolvedFunction,
+  client: ModalClient,
+): FunctionClient => {
+  const { functionId, method } = resolved;
 
-  const result = Effect.fn(function* (
+  /** Collect `count` outputs of a call, by input index. */
+  const collect = Effect.fn(function* (
     functionCallId: string,
+    count: number,
     timeout: number | string | undefined,
   ) {
     const budget = seconds(timeout) ?? 300;
     const rounds = Math.max(1, Math.ceil(budget / 55));
-    for (let round = 0; round < rounds; round++) {
-      const { outputs } = yield* functions.getFunctionOutputs({
+    const values = new Map<number, unknown>();
+    let lastEntryId = "0-0";
+    for (let round = 0; round < rounds && values.size < count; round++) {
+      const response = yield* functions.getFunctionOutputs({
         functionCallId,
-        maxValues: 1,
+        maxValues: Math.min(1000, count - values.size),
         timeout: Math.min(55, budget),
-        lastEntryId: "0-0",
+        lastEntryId,
         clearOnSuccess: true,
       });
-      const output = outputs?.[0];
-      if (!output?.result) continue;
-      if (output.result.status !== "GENERIC_STATUS_SUCCESS") {
-        return yield* new FunctionCallFailed({
-          status: output.result.status ?? "GENERIC_STATUS_UNSPECIFIED",
-          message: output.result.exception || `Function call ${functionCallId} failed`,
-          traceback: output.result.traceback,
-        });
+      if (response.lastEntryId) lastEntryId = response.lastEntryId;
+      for (const output of response.outputs ?? []) {
+        if (!output.result) continue;
+        values.set(output.idx ?? 0, yield* decodeOutput(functionCallId, output));
       }
-      return yield* decodeResult(output.result.data);
     }
-    return yield* new FunctionCallTimeout({
-      functionCallId,
-      message: `Function call ${functionCallId} didn't finish within ${budget} seconds`,
+    if (values.size < count) {
+      return yield* new FunctionCallTimeout({
+        functionCallId,
+        message: `Function call ${functionCallId} didn't finish within ${budget} seconds`,
+      });
+    }
+    return Array.from({ length: count }, (_, idx) => values.get(idx));
+  });
+
+  const start = Effect.fn(function* (
+    inputs: ReadonlyArray<readonly [ReadonlyArray<unknown>, Record<string, unknown>]>,
+    type: "FUNCTION_CALL_TYPE_UNARY" | "FUNCTION_CALL_TYPE_MAP",
+  ) {
+    const id = yield* functionId;
+    const items = yield* Effect.forEach(inputs, ([args, kwargs], idx) =>
+      Effect.map(encodeInput(args, kwargs, method, idx === inputs.length - 1), (input) => ({
+        idx,
+        input,
+      })),
+    );
+    const response = yield* functions.functionMap({
+      functionId: id,
+      functionCallType: type,
+      functionCallInvocationType: "FUNCTION_CALL_INVOCATION_TYPE_SYNC",
+      returnExceptions: false,
+      pipelinedInputs: items.slice(0, BATCH),
     });
+    const functionCallId = response.functionCallId ?? "";
+    for (let offset = BATCH; offset < items.length; offset += BATCH) {
+      yield* functions.functionPutInputs({
+        functionId: id,
+        functionCallId,
+        inputs: items.slice(offset, offset + BATCH),
+      });
+    }
+    return functionCallId;
   });
 
   return {
     call: <A>(
       args: ReadonlyArray<unknown> = [],
       kwargs: Record<string, unknown> = {},
-      options: { readonly timeout?: number | string } = {},
+      options: CallOptions = {},
     ) =>
       client(
-        start(args, kwargs, "FUNCTION_CALL_INVOCATION_TYPE_SYNC").pipe(
-          Effect.flatMap((id) => result(id, options.timeout)),
+        start([[args, kwargs]], "FUNCTION_CALL_TYPE_UNARY").pipe(
+          Effect.flatMap((id) => collect(id, 1, options.timeout)),
           // CBOR results are untyped; the caller names the shape it expects.
-          Effect.map((value) => value as A),
+          Effect.map(([value]) => value as A),
         ),
       ),
+    map: <A>(inputs: ReadonlyArray<ReadonlyArray<unknown>>, options: CallOptions = {}) =>
+      inputs.length === 0
+        ? Effect.succeed([] as A[])
+        : client(
+            start(
+              inputs.map((args) => [args, {}] as const),
+              "FUNCTION_CALL_TYPE_MAP",
+            ).pipe(
+              Effect.flatMap((id) => collect(id, inputs.length, options.timeout)),
+              Effect.map((values) => values as A[]),
+            ),
+          ),
     spawn: (args = [], kwargs = {}) =>
       client(
-        start(args, kwargs, "FUNCTION_CALL_INVOCATION_TYPE_ASYNC").pipe(
-          Effect.map((functionCallId) => ({ functionCallId })),
-        ),
+        Effect.gen(function* () {
+          const id = yield* functionId;
+          const input = yield* encodeInput(args, kwargs, method, true);
+          let response = yield* functions.invokeFunctionAsync({ functionId: id, input });
+          // Modal asks for the input as a blob when it's over the function's inline limit.
+          if (response.retryWithBlobUpload) {
+            const blobInput = yield* encodeInput(args, kwargs, method, true, true);
+            response = yield* functions.invokeFunctionAsync({ functionId: id, input: blobInput });
+          }
+          return { functionCallId: response.functionCallId ?? "" };
+        }),
       ),
-    result: <A>(
-      call: { readonly functionCallId: string },
-      options: { readonly timeout?: number | string } = {},
-    ) =>
-      client(result(call.functionCallId, options.timeout)).pipe(Effect.map((value) => value as A)),
+    result: <A>(call: { readonly functionCallId: string }, options: CallOptions = {}) =>
+      client(collect(call.functionCallId, 1, options.timeout)).pipe(
+        Effect.map(([value]) => value as A),
+      ),
     cancel: (call) =>
       client(
         functions.cancelFunctionCall({ functionCallId: call.functionCallId }).pipe(
@@ -157,8 +207,9 @@ export const makeFunctionClient = (ref: FunctionRef, client: ModalClient): Funct
  */
 export const InvokeFunctionHttp = Layer.effect(
   InvokeFunction,
-  makeOpenModalBinding({
+  makeFunctionBinding({
     tag: "Modal.InvokeFunction",
-    make: (client, ref: FunctionRef) => Effect.succeed(makeFunctionClient(ref, client)),
+    make: (resolved, client, _target: FunctionTarget) =>
+      Effect.succeed(makeFunctionClient(resolved, client)),
   }),
 );

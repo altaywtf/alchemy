@@ -61,14 +61,76 @@ export interface CloudBucketMountOptions {
   readonly oidcAuthRoleArn?: string;
 }
 
-/** Inject a secret's variables as headers into matching outbound HTTPS requests. */
+/** Where a route sends matching traffic: blocked, through a `Modal.Proxy`, or to a sidecar. */
+export type OutboundRedirect =
+  | "block"
+  | { readonly proxy: { readonly proxyId: string } }
+  | { readonly sidecar: string };
+
+/** An inclusive port range, or one port. */
+export type OutboundPorts = ReadonlyArray<
+  number | { readonly start: number; readonly end: number }
+>;
+
+/** Set headers on decrypted HTTPS requests, with values from a secret. */
 export interface HeaderReplacement {
-  /** Host the replacement applies to (`api.openai.com`). */
-  readonly domain: string;
-  /** The secret whose variables the header values reference. */
-  readonly secret: { readonly secretId: string };
-  /** Headers to set; `{VAR}` is replaced with the secret's `VAR`. */
+  /** The secret whose keys the header values reference. Omit for static values. */
+  readonly secret?: { readonly secretId: string };
+  /** Header name to value; `$KEY` is replaced with the secret's `KEY`, `$$` is a literal `$`. */
   readonly headers: Record<string, string>;
+}
+
+/**
+ * One route of an {@link OutboundPolicy}. Routes match in order; traffic a
+ * route matches without a `redirect` goes to its destination.
+ */
+export type OutboundRoute =
+  | {
+      /** Traffic to these CIDR ranges. */
+      readonly ip: {
+        readonly cidrs: ReadonlyArray<string>;
+        /** @default every port */
+        readonly ports?: OutboundPorts;
+        readonly transport?: "tcp" | "udp" | "any";
+        readonly redirect?: OutboundRedirect;
+      };
+    }
+  | {
+      /** TLS connections to these domains (`*.` wildcards allowed), never decrypted. */
+      readonly tls: {
+        readonly domains: ReadonlyArray<string>;
+        /** @default 443 */
+        readonly ports?: OutboundPorts;
+        readonly redirect?: OutboundRedirect;
+      };
+    }
+  | {
+      /** HTTPS requests to these domains, decrypted so headers can be replaced. */
+      readonly https: {
+        readonly domains: ReadonlyArray<string>;
+        /** @default 443 */
+        readonly ports?: OutboundPorts;
+        readonly headerReplacements?: ReadonlyArray<HeaderReplacement>;
+        readonly redirect?: OutboundRedirect;
+      };
+    }
+  | {
+      /** Everything no earlier route matched. Must be the last route. */
+      readonly any: { readonly redirect?: OutboundRedirect };
+    };
+
+/**
+ * A sandbox's outbound traffic rules, enforced by Modal outside the
+ * sandbox. HTTPS routes decrypt traffic with a certificate authority the
+ * sandbox trusts, so Modal can add credentials the sandbox never sees.
+ */
+export interface OutboundPolicy {
+  readonly routes: ReadonlyArray<OutboundRoute>;
+  /**
+   * Let HTTPS routes decrypt traffic. Fixed at creation.
+   * @default true when a route is `https`
+   */
+  readonly tlsDecryption?: boolean;
 }
 
 /** Options for creating a sandbox: Modal's own sandbox parameters. */
@@ -119,7 +181,7 @@ export interface SandboxCreateOptions {
   /** Allow inbound connections (tunnels) only from these CIDR ranges. */
   readonly inboundCidrAllowlist?: ReadonlyArray<string>;
   /** Outbound header injection: secrets the sandbox never sees. */
-  readonly outboundPolicy?: { readonly headerReplacements: ReadonlyArray<HeaderReplacement> };
+  readonly outboundPolicy?: OutboundPolicy;
   /** Route outbound traffic through a `Modal.Proxy`'s static IPs. */
   readonly proxy?: { readonly proxyId: string };
   /** Ports reachable through TLS tunnels (`sandbox.tunnels()`). */
@@ -211,9 +273,7 @@ export interface SandboxHandleOf<R> {
     readonly allowedDomains?: ReadonlyArray<string>;
   }): Effect.Effect<void, any, R>;
   /** Replace the outbound header injection rules while it runs. */
-  setOutboundPolicy(policy: {
-    readonly headerReplacements: ReadonlyArray<HeaderReplacement>;
-  }): Effect.Effect<void, any, R>;
+  setOutboundPolicy(policy: OutboundPolicy): Effect.Effect<void, any, R>;
   /** Replace the sandbox's tags. */
   setTags(tags: Record<string, string>): Effect.Effect<void, any, R>;
   /** The sandbox's tags. */
@@ -298,15 +358,11 @@ const tunnelTypeOf = (h2: boolean): sandbox.TunnelType | undefined =>
 
 const BUCKET_TYPE = { s3: "S3", r2: "R2", gcp: "GCP" } as const;
 
-/** Modal's `Sandbox` definition for {@link SandboxCreateOptions}. */
-const definitionOf = (imageId: string, options: SandboxCreateOptions): sandbox.Sandbox => ({
-  imageId,
-  entrypointArgs: options.command ? [...options.command] : ["sleep", "infinity"],
-  workdir: options.workdir,
-  environmentVariables: options.env,
-  secretIds: options.secrets?.map((s) => s.secretId),
-  mountIds: options.mounts?.map((m) => m.mountId),
-  volumeMounts: Object.entries(options.volumes ?? {}).map(([mountPath, mount]) =>
+/** Modal's volume mounts for a `{ [path]: volume }` map. */
+export const volumeMountsOf = (
+  volumes: Record<string, SandboxVolumeMount> | undefined,
+): sandbox.VolumeMount[] =>
+  Object.entries(volumes ?? {}).map(([mountPath, mount]) =>
     "volume" in mount
       ? {
           mountPath,
@@ -316,8 +372,13 @@ const definitionOf = (imageId: string, options: SandboxCreateOptions): sandbox.S
           allowBackgroundCommits: true,
         }
       : { mountPath, volumeId: mount.volumeId, allowBackgroundCommits: true },
-  ),
-  cloudBucketMounts: Object.entries(options.cloudBucketMounts ?? {}).map(([mountPath, mount]) => ({
+  );
+
+/** Modal's cloud bucket mounts for a `{ [path]: bucket }` map. */
+export const cloudBucketMountsOf = (
+  buckets: Record<string, CloudBucketMountOptions> | undefined,
+): sandbox.CloudBucketMount[] =>
+  Object.entries(buckets ?? {}).map(([mountPath, mount]) => ({
     mountPath,
     bucketName: mount.bucketName,
     bucketType: mount.type ? BUCKET_TYPE[mount.type] : undefined,
@@ -326,7 +387,18 @@ const definitionOf = (imageId: string, options: SandboxCreateOptions): sandbox.S
     keyPrefix: mount.keyPrefix,
     readOnly: mount.readOnly,
     oidcAuthRoleArn: mount.oidcAuthRoleArn,
-  })),
+  }));
+
+/** Modal's `Sandbox` definition for {@link SandboxCreateOptions}. */
+const definitionOf = (imageId: string, options: SandboxCreateOptions): sandbox.Sandbox => ({
+  imageId,
+  entrypointArgs: options.command ? [...options.command] : ["sleep", "infinity"],
+  workdir: options.workdir,
+  environmentVariables: options.env,
+  secretIds: options.secrets?.map((s) => s.secretId),
+  mountIds: options.mounts?.map((m) => m.mountId),
+  volumeMounts: volumeMountsOf(options.volumes),
+  cloudBucketMounts: cloudBucketMountsOf(options.cloudBucketMounts),
   resources: {
     milliCpu: options.cpu !== undefined ? Math.round(options.cpu * 1000) : undefined,
     memoryMb: options.memory,
@@ -370,14 +442,62 @@ const networkAccessOf = (options: {
         }
       : undefined;
 
-const outboundPolicyOf = (policy: {
-  readonly headerReplacements: ReadonlyArray<HeaderReplacement>;
-}): sandbox.OutboundPolicy => ({
-  headerReplacements: policy.headerReplacements.map((r) => ({
-    domain: r.domain,
-    secretId: r.secret.secretId,
-    headers: r.headers,
-  })),
+const portsOf = (ports: OutboundPorts | undefined) =>
+  ports?.map((port) => (typeof port === "number" ? { start: port, end: port } : port));
+
+const transportOf = (transport: "tcp" | "udp" | "any" | undefined) =>
+  transport === undefined ? undefined : (`TRANSPORT_${transport.toUpperCase()}` as const);
+
+const redirectOf = (
+  redirect: OutboundRedirect | undefined,
+): sandbox.OutboundPolicyRedirect | undefined =>
+  redirect === undefined
+    ? undefined
+    : redirect === "block"
+      ? { block: {} }
+      : "proxy" in redirect
+        ? { viaProxy: { proxyId: redirect.proxy.proxyId } }
+        : { viaSidecar: { sidecarName: redirect.sidecar } };
+
+const outboundPolicyOf = (policy: OutboundPolicy): sandbox.OutboundPolicy => ({
+  tlsDecryption: {
+    allowed: policy.tlsDecryption ?? policy.routes.some((route) => "https" in route),
+  },
+  routes: policy.routes.map((route): sandbox.OutboundPolicyRoute => {
+    if ("ip" in route) {
+      return {
+        ip: {
+          cidrs: [...route.ip.cidrs],
+          ports: portsOf(route.ip.ports),
+          transport: transportOf(route.ip.transport),
+          redirect: redirectOf(route.ip.redirect),
+        },
+      };
+    }
+    if ("tls" in route) {
+      return {
+        tls: {
+          domains: [...route.tls.domains],
+          ports: portsOf(route.tls.ports),
+          redirect: redirectOf(route.tls.redirect),
+        },
+      };
+    }
+    if ("https" in route) {
+      return {
+        https: {
+          domains: [...route.https.domains],
+          ports: portsOf(route.https.ports),
+          headerReplacements: route.https.headerReplacements?.map((r) => ({
+            secretId: r.secret?.secretId,
+            headers: r.headers,
+          })),
+          redirect: redirectOf(route.https.redirect),
+        },
+      };
+    }
+    return { any: { redirect: redirectOf(route.any.redirect) } };
+  }),
 });
 
 /**
@@ -440,47 +560,23 @@ export const sandboxHandle = (
       return yield* f(id).pipe(withTaskCommandRouter({ url: access.url, jwt: access.jwt }));
     });
 
-  /** Run one filesystem request and collect its output bytes. */
-  const fsExec = Effect.fn(function* (
-    request: container.ExecContainerFilesystemRequest,
-    path: string,
-  ) {
-    const id = yield* taskId;
-    const { execId, fileDescriptor } = yield* container.execContainerFilesystem({
-      ...request,
-      taskId: id,
-    });
-    if (!execId) {
-      return yield* new SandboxUnexpectedResponse({ message: `No exec id for ${path}` });
-    }
-    const chunks: string[] = [];
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const { items } = yield* container.containerFilesystemExecGetOutput({ execId, timeout: 55 });
-      let eof = false;
-      for (const batch of items) {
-        if (batch.error?.errorMessage) {
-          return yield* new SandboxFilesystemError({ path, message: batch.error.errorMessage });
-        }
-        chunks.push(...(batch.output ?? []));
-        if (batch.eof) eof = true;
-      }
-      if (eof) break;
-    }
-    return { fileDescriptor, output: chunks };
-  });
-
-  const withFile = Effect.fn(function* <A, E, R>(
-    path: string,
-    mode: string,
-    use: (fd: string) => Effect.Effect<A, E, R>,
-  ) {
-    const opened = yield* fsExec({ fileOpenRequest: { path, mode } }, path);
-    const fd = opened.fileDescriptor;
-    if (!fd) return yield* new SandboxFilesystemError({ path, message: `Couldn't open ${path}` });
-    return yield* use(fd).pipe(
-      Effect.ensuring(Effect.ignore(fsExec({ fileCloseRequest: { fileDescriptor: fd } }, path))),
+  /**
+   * Run a filesystem command with `sh` (every image Modal boots has one) and
+   * fail with {@link SandboxFilesystemError} on a non-zero exit.
+   */
+  const fsExec = (path: string, script: string, stdin?: string | Uint8Array) =>
+    Effect.flatMap(
+      handle.exec(["sh", "-c", script, "sh", path], stdin === undefined ? {} : { stdin }),
+      (result) =>
+        result.exitCode === 0
+          ? Effect.succeed(result.stdout)
+          : Effect.fail(
+              new SandboxFilesystemError({
+                path,
+                message: result.stderr.trim() || `exit code ${result.exitCode}`,
+              }),
+            ),
     );
-  });
 
   const handle: RawSandboxHandle = {
     sandboxId,
@@ -530,46 +626,34 @@ export const sandboxHandle = (
       };
     }),
     readFile: Effect.fn(function* (path) {
-      const chunks = yield* withFile(path, "rb", (fd) =>
-        fsExec({ fileReadRequest: { fileDescriptor: fd } }, path).pipe(Effect.map((r) => r.output)),
-      );
-      const parts = yield* Effect.forEach(chunks, decodeBase64);
-      const total = parts.reduce((n, part) => n + part.length, 0);
-      const out = new Uint8Array(total);
-      let offset = 0;
-      for (const part of parts) {
-        out.set(part, offset);
-        offset += part.length;
-      }
-      return out;
+      // base64 keeps binary content intact through the text output stream.
+      const encoded = yield* fsExec(path, 'base64 < "$1" | tr -d "\\n"');
+      return yield* decodeBase64(encoded);
     }),
     readFileString: (path) =>
       handle.readFile(path).pipe(Effect.map((bytes) => new TextDecoder().decode(bytes))),
     writeFile: Effect.fn(function* (path, data) {
       const encoded = yield* encodeBase64(data);
-      yield* withFile(path, "wb", (fd) =>
-        fsExec({ fileWriteRequest: { fileDescriptor: fd, data: encoded } }, path),
-      );
+      yield* fsExec(path, 'mkdir -p "$(dirname "$1")" && base64 -d > "$1"', encoded);
     }),
     listFiles: Effect.fn(function* (path) {
-      const { output } = yield* fsExec({ fileLsRequest: { path } }, path);
-      const chunks = yield* Effect.forEach(output, decodeBase64);
-      const text = chunks.map((bytes) => new TextDecoder().decode(bytes)).join("");
-      // Modal answers `ls` with a JSON object: { paths: [...] }.
-      const parsed = yield* Effect.try({
-        try: () => JSON.parse(text || "{}") as { paths?: string[] },
-        catch: () => new SandboxFilesystemError({ path, message: `Unexpected ls output: ${text}` }),
-      });
-      return (parsed.paths ?? []).map((entry) => ({
-        path: entry,
-        type: entry.endsWith("/") ? "DIRECTORY" : "FILE",
-      }));
+      const output = yield* fsExec(
+        path,
+        'cd "$1" && for f in * .[!.]* ..?*; do [ -e "$f" ] || [ -L "$f" ] || continue; if [ -d "$f" ]; then echo "d $f"; else echo "f $f"; fi; done',
+      );
+      return output
+        .split("\n")
+        .filter((line) => line.length > 2)
+        .map((line) => ({
+          path: `${path.replace(/\/$/, "")}/${line.slice(2)}`,
+          type: line.startsWith("d ") ? "DIRECTORY" : "FILE",
+        }));
     }),
     mkdir: Effect.fn(function* (path) {
-      yield* fsExec({ fileMkdirRequest: { path, makeParents: true } }, path);
+      yield* fsExec(path, 'mkdir -p "$1"');
     }),
     remove: Effect.fn(function* (path, options = {}) {
-      yield* fsExec({ fileRmRequest: { path, recursive: options.recursive } }, path);
+      yield* fsExec(path, options.recursive ? 'rm -r "$1"' : 'rm "$1"');
     }),
     tunnels: Effect.fn(function* (timeout) {
       const { tunnels } = yield* sandbox.sandboxGetTunnelsV2({
@@ -650,10 +734,12 @@ export const sandboxHandle = (
           networkAccess: networkAccessOf(access) ?? { networkAccessType: "OPEN" },
         }),
       ).pipe(Effect.asVoid),
-    setOutboundPolicy: (policy) =>
-      viaRouter((task) =>
-        router.taskSetOutboundPolicy({ taskId: task, outboundPolicy: outboundPolicyOf(policy) }),
-      ).pipe(Effect.asVoid),
+    setOutboundPolicy: Effect.fn(function* (policy) {
+      yield* sandbox.sandboxSetOutboundPolicyV2({
+        sandboxId,
+        outboundPolicy: outboundPolicyOf(policy),
+      });
+    }),
     setTags: Effect.fn(function* (tags) {
       yield* sandbox.sandboxTagsSetV2({
         sandboxId,
