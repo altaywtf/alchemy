@@ -29,7 +29,7 @@ test.provider(
 
       const replaced = yield* stack.deploy(app("1h"));
       expect(replaced.token.tokenId).not.toBe(token.tokenId);
-      expect(replaced.token.expiresAt).toBeDefined();
+      expect(Date.parse(replaced.token.expiresAt ?? "")).toBeGreaterThan(Date.now());
 
       yield* stack.destroy();
     }),

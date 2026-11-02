@@ -54,7 +54,8 @@ fetch: Effect.gen(function* () {
 ```diff lang="typescript"
 const home = yield* disks.create(`home-${user}`);
 +if (request.method === "POST") {
-+  yield* home.append("notes.md", `- ${yield* request.text}\n`);
++  const note = yield* request.text;
++  yield* home.append("notes.md", `- ${note}\n`);
 +  return yield* HttpServerResponse.json({ ok: true });
 +}
 ```

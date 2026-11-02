@@ -365,8 +365,8 @@ export const DiskProvider = () =>
         reconcile: Effect.fn(function* ({ id, news, output, session }) {
           // Observe + ensure
           const name = output?.name ?? (yield* diskName(id, news.name));
+          yield* session.note(`Ensuring disk ${name}...`);
           const disk = yield* ensureDisk(name, news.storage, output?.diskId);
-          if (output === undefined) yield* session.note(`Disk ${name} is ${disk.id}`);
           // Sync
           const settings = yield* syncDiskSettings(disk.id, news);
           return toDiskAttributes(disk, settings);

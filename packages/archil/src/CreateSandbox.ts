@@ -148,7 +148,8 @@ export const CreateSandboxHttp = Layer.effect(
         get: (name) =>
           authorize(
             Effect.gen(function* () {
-              const found = yield* findSandboxByName(yield* fullName(name));
+              const sandboxName = yield* fullName(name);
+              const found = yield* findSandboxByName(sandboxName);
               return found ? handle(found) : undefined;
             }),
           ),
@@ -164,7 +165,8 @@ export const CreateSandboxHttp = Layer.effect(
         delete: (name) =>
           authorize(
             Effect.gen(function* () {
-              const found = yield* findSandboxByName(yield* fullName(name));
+              const sandboxName = yield* fullName(name);
+              const found = yield* findSandboxByName(sandboxName);
               if (found) yield* deleteSandbox(found.sandbox_id);
             }),
           ),

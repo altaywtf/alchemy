@@ -150,7 +150,8 @@ export const BranchProvider = () =>
         read: Effect.fn(function* ({ id, olds, output }) {
           if (!output && !olds) return undefined;
           const diskId = output?.diskId ?? olds!.disk;
-          return yield* getBranch(diskId, output?.name ?? (yield* branchName(id, olds?.name)));
+          const name = output?.name ?? (yield* branchName(id, olds?.name));
+          return yield* getBranch(diskId, name);
         }),
         reconcile: Effect.fn(function* ({ id, news, output }) {
           return yield* ensureBranch({

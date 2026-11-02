@@ -286,7 +286,8 @@ export const makeExecDiskClient = (
   exec: (command) =>
     authorize(
       Effect.gen(function* () {
-        const { data } = yield* archil.execDisk({ id: yield* diskId, command });
+        const id = yield* diskId;
+        const { data } = yield* archil.execDisk({ id, command });
         return toExecResult(data);
       }),
     ),
@@ -398,7 +399,8 @@ export const makeBranchDiskClient = (
   getBranch: (name) =>
     authorize(
       Effect.gen(function* () {
-        return yield* archil.getBranch({ id: yield* diskId, name }).pipe(
+        const id = yield* diskId;
+        return yield* archil.getBranch({ id, name }).pipe(
           Effect.map(({ data }) => toBranchAttributes(data)),
           Effect.catchTag("BranchNotFound", () => Effect.undefined),
         );
@@ -407,7 +409,8 @@ export const makeBranchDiskClient = (
   listBranches: () =>
     authorize(
       Effect.gen(function* () {
-        const { data } = yield* archil.listBranches({ id: yield* diskId });
+        const id = yield* diskId;
+        const { data } = yield* archil.listBranches({ id });
         return data.map(toBranchAttributes);
       }),
     ),

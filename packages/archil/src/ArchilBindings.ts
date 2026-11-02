@@ -55,6 +55,8 @@ export const ApiAccess = Effect.gen(function* () {
       {
         stream: <A, E, R>(stream: Stream.Stream<A, E, R>) => stream.pipe(Stream.provide(layer)),
       },
+      // TypeScript can't infer a generic call signature whose requirement is
+      // `Exclude<R, …>` from `Effect.provide`, so the shape is asserted.
     ) as unknown as Authorize;
     return authorize;
   });

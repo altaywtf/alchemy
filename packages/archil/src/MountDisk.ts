@@ -112,6 +112,9 @@ const bindClientCapability = Effect.gen(function* () {
   if (globalThis.__ALCHEMY_RUNTIME__) return;
   const host = yield* Binding.Host;
   if (!host) return;
+  // `Binding.Host` is typed as a bare `ResourceLike` (no `bind`): a host's
+  // binding contract is only known per host type, and `MountBinding` is the
+  // slice every mount-capable host accepts.
   yield* (
     host as unknown as { bind: (sid: string, data: MountBinding) => Effect.Effect<void> }
   ).bind("Archil.MountDisk", { mounts: [archilClientCapability] });
@@ -139,7 +142,12 @@ const run = (
       { concurrency: 2 },
     );
     return { exitCode: Number(exitCode), stderr };
-  }).pipe(Effect.scoped, Effect.provideService(ChildProcessSpawner, spawner), Effect.orDie);
+  }).pipe(
+    Effect.scoped,
+    Effect.provideService(ChildProcessSpawner, spawner),
+    // The binary is missing or can't start: report it like a failed command.
+    Effect.catch((cause) => Effect.succeed({ exitCode: 127, stderr: String(cause) })),
+  );
 
 /** Mount a disk for the life of the ambient scope. */
 const mountFor = (
@@ -227,7 +235,8 @@ export interface MountDiskOptions {
  *       fetch: Effect.scoped(
  *         Effect.gen(function* () {
  *           const path = yield* dataset.mount({ mode: "read-only" });
- *           return yield* HttpServerResponse.json(yield* fs.readDirectory(path));
+ *           const entries = yield* fs.readDirectory(path);
+ *           return yield* HttpServerResponse.json(entries);
  *         }),
  *       ),
  *     };

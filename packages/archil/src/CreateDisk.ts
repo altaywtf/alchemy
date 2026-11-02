@@ -131,7 +131,8 @@ export const CreateDiskHttp = Layer.effect(
         get: (name) =>
           authorize(
             Effect.gen(function* () {
-              const disk = yield* findDiskByName(yield* fullName(name));
+              const diskName = yield* fullName(name);
+              const disk = yield* findDiskByName(diskName);
               return disk && disk.status !== "deleted" ? handle(disk) : undefined;
             }),
           ),
@@ -148,7 +149,8 @@ export const CreateDiskHttp = Layer.effect(
         delete: (name) =>
           authorize(
             Effect.gen(function* () {
-              const disk = yield* findDiskByName(yield* fullName(name));
+              const diskName = yield* fullName(name);
+              const disk = yield* findDiskByName(diskName);
               if (disk) yield* deleteDisk(disk.id);
             }),
           ),

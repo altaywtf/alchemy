@@ -4,6 +4,7 @@ import * as Test from "@alchemy.run/test/Alchemy";
 import * as archil from "@distilled.cloud/archil";
 import { Credentials, controlPlaneUrl } from "@distilled.cloud/archil/Credentials";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 
 const { test } = Test.make({ providers: Archil.providers() });
 
@@ -18,19 +19,19 @@ test.provider(
     Effect.gen(function* () {
       yield* stack.destroy();
       const token = yield* stack.deploy(Archil.ApiToken("Ci", { description: "first" }));
-      expect(token.token).toBeDefined();
+      expect(Redacted.value(token.token)).toMatch(/^key-/);
       expect((yield* listed(token.tokenId))?.name).toBe(token.name);
 
-      // The minted key works with its own credentials.
+      // The minted key works with its own credentials, and sees itself.
       const { data } = yield* archil
-        .listDisks({ limit: 1 })
+        .listApiTokens({})
         .pipe(
           Effect.provideService(
             Credentials,
             Effect.succeed({ apiKey: token.token, apiBaseUrl: controlPlaneUrl(token.region)! }),
           ),
         );
-      expect(Array.isArray(data)).toBe(true);
+      expect((data.tokens ?? []).map((t) => t.id)).toContain(token.tokenId);
 
       const replaced = yield* stack.deploy(Archil.ApiToken("Ci", { description: "second" }));
       expect(replaced.tokenId).not.toBe(token.tokenId);

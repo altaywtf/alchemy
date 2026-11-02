@@ -50,8 +50,10 @@ export default class ArchilWorker extends Cloudflare.Worker<ArchilWorker>()(
         const q = (name: string) => url.searchParams.get(name) ?? "";
 
         switch (url.pathname) {
-          case "/exec":
-            return yield* HttpServerResponse.json(yield* exec.exec(q("command")));
+          case "/exec": {
+            const result = yield* exec.exec(q("command"));
+            return yield* HttpServerResponse.json(result);
+          }
           case "/grep":
             return yield* HttpServerResponse.json(
               yield* exec.grep({ pattern: q("pattern"), directory: "/", recursive: true }),

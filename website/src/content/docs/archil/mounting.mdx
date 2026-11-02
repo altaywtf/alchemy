@@ -18,7 +18,8 @@ export default class Indexer extends Cloudflare.Container<Indexer>()(
       fetch: Effect.scoped(
         Effect.gen(function* () {
           const path = yield* dataset.mount({ mode: "read-only" });
-          return yield* HttpServerResponse.json(yield* fs.readDirectory(path));
+          const entries = yield* fs.readDirectory(path);
+          return yield* HttpServerResponse.json(entries);
         }),
       ),
     };
@@ -66,7 +67,8 @@ export default class Reader extends AWS.ECS.Task<Reader>()(
       fetch: Effect.scoped(
         Effect.gen(function* () {
           const path = yield* dataset.mount({ mode: "read-only" });
-          return yield* HttpServerResponse.json(yield* fs.readDirectory(path));
+          const entries = yield* fs.readDirectory(path);
+          return yield* HttpServerResponse.json(entries);
         }),
       ),
     };

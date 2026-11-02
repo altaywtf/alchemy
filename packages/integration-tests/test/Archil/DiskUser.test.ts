@@ -3,6 +3,7 @@ import { expect } from "@alchemy.run/test";
 import * as Test from "@alchemy.run/test/Alchemy";
 import * as archil from "@distilled.cloud/archil";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 
 const { test } = Test.make({ providers: Archil.providers() });
 
@@ -26,7 +27,7 @@ test.provider(
 
       const { disk, user } = yield* stack.deploy(app());
       expect(user.type).toBe("token");
-      expect(user.token).toBeDefined();
+      expect(Redacted.value(user.token!).length).toBeGreaterThan(0);
       expect(yield* users(disk.diskId)).toContain(user.identifier);
 
       const renamed = yield* stack.deploy(app("reader-2"));
