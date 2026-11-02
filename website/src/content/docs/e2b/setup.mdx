@@ -1,0 +1,50 @@
+---
+title: Setup
+description: Give Alchemy an E2B API key.
+---
+
+import PackageManagers from "../../../components/PackageManagers.astro";
+
+Sign up at [e2b.dev](https://e2b.dev), then copy an API key from the [dashboard](https://e2b.dev/dashboard?tab=keys). It starts with `e2b_`.
+
+E2B API keys are not scoped: a key reaches every sandbox, template, volume, and secret in the team. Use a separate team for tests.
+
+## Add the provider
+
+Install `@alchemy.run/e2b`:
+
+<PackageManagers add="@alchemy.run/e2b" />
+
+Then add `E2B.providers()` next to your cloud's providers:
+
+```typescript
+// alchemy.run.ts
+import * as E2B from "@alchemy.run/e2b";
+
+providers: Layer.mergeAll(Cloudflare.providers(), E2B.providers()),
+```
+
+## Store the key in a profile
+
+```sh
+alchemy profile edit --add E2B
+```
+
+Paste the API key when asked. Leave the access token and team id blank unless you manage [API keys](/e2b/api-keys) from your Stack.
+
+See [Profiles](/environments/profiles) to learn how profiles work.
+
+## Use environment variables in CI
+
+Set `E2B_API_KEY` and Alchemy uses it instead of your profile:
+
+```sh
+E2B_API_KEY=e2b_... alchemy deploy
+```
+
+`E2B.ApiKey` also needs `E2B_ACCESS_TOKEN` and `E2B_TEAM_ID`.
+
+## Next steps
+
+- [Build the tutorial](/e2b/tutorial/part-1)
+- [Concepts](/e2b/concepts)

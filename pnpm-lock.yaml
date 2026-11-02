@@ -4153,6 +4153,28 @@ importers:
         specifier: 4.1.0
         version: 4.1.0
 
+  examples/e2b-agent-sandbox:
+    dependencies:
+      '@alchemy.run/cloudflare':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare
+      '@alchemy.run/docker':
+        specifier: workspace:*
+        version: link:../../packages/docker
+      '@alchemy.run/e2b':
+        specifier: workspace:*
+        version: link:../../packages/e2b
+      alchemy:
+        specifier: workspace:*
+        version: link:../../packages/alchemy
+      effect:
+        specifier: 4.1.0
+        version: 4.1.0
+    devDependencies:
+      '@alchemy.run/test':
+        specifier: workspace:*
+        version: link:../../packages/alchemy-test
+
   examples/fly-app:
     dependencies:
       '@alchemy.run/fly':

@@ -54,6 +54,7 @@ const examples = [
   "./examples/cloudflare-website-vocs",
   "./examples/cloudflare-agents",
   "./examples/cloudflare-flue",
+  "./examples/e2b-agent-sandbox",
   "./examples/aws-dev",
   // "./examples/aws-ecs",
   "./examples/aws-lambda",

@@ -1,0 +1,58 @@
+---
+title: Volumes
+description: Keep files that outlive sandboxes, mount them by name, and read or write them without a sandbox.
+---
+
+## Declare a shared volume
+
+```typescript
+// src/Storage.ts
+import * as E2B from "@alchemy.run/e2b";
+
+export const Cache = E2B.Volume("Cache", {});
+```
+
+Changing `name` replaces the volume and loses its files.
+
+## Mount it
+
+```typescript
+const cache = yield* Cache;
+const sandbox = yield* sandboxes.create({
+  volumeMounts: [{ name: cache.name, path: "/cache" }],
+});
+```
+
+## A volume per user
+
+```typescript
+const volumes = yield* E2B.CreateVolume();
+// in fetch:
+const home = yield* volumes.getOrCreate(`home-${user}`);
+const sandbox = yield* sandboxes.create({ volumeMounts: [{ name: home.name, path: "/home/user/work" }] });
+```
+
+Provide `E2B.CreateVolumeHttp`. Runtime volumes are not deleted when you destroy the Worker: call `volumes.delete(home.volumeId)` when the user goes away.
+
+## Read files without a sandbox
+
+```typescript
+const reports = yield* E2B.ReadVolume(Reports);
+// in fetch:
+const report = yield* reports.readText("/report.json");
+const entries = yield* reports.list("/");
+```
+
+Provide `E2B.ReadVolumeHttp`. The client uses the volume's own token, looked up with your API key.
+
+## Write files without a sandbox
+
+```typescript
+const inputs = yield* E2B.WriteVolume(Inputs);
+// in fetch:
+yield* inputs.write("/task.json", JSON.stringify(task));
+yield* inputs.makeDir("/results");
+yield* inputs.remove("/old");
+```
+
+`E2B.ReadWriteVolume` does both. A runtime volume's `files` is a read-write client too.

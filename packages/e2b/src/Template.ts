@@ -197,7 +197,82 @@ export interface Template extends Resource<
  * });
  * ```
  *
- * ### Creating sandboxes
+ * ### Effect program
+ * Give the template a `main` and an Effect, and every sandbox from it boots
+ * with the program already serving HTTP on `port`. Alchemy bundles `main`,
+ * copies it into the template, and E2B snapshots the template once the
+ * program answers. The image defaults to `node:22-bookworm`.
+ *
+ * **Example:** A program in every sandbox
+ * ```typescript
+ * export default class Program extends E2B.Template<Program>()(
+ *   "Program",
+ *   { main: import.meta.url, port: 3000 },
+ *   Effect.gen(function* () {
+ *     return {
+ *       fetch: Effect.succeed(HttpServerResponse.text("hello from a sandbox")),
+ *     };
+ *   }),
+ * ) {}
+ * ```
+ *
+ * **Example:** Call the program in a sandbox
+ * ```typescript
+ * const sandboxes = yield* E2B.CreateSandbox(Program);
+ * const sandbox = yield* sandboxes.create({ timeout: 300 });
+ * const res = yield* sandbox.fetch(3000, HttpClientRequest.get("/"));
+ * ```
+ *
+ * ### Async program
+ * A `main` without an Effect is bundled and run with Node as-is. It must
+ * listen on `PORT`. `E2B.InferEnv` types its `env`.
+ *
+ * **Example:** A plain Node server
+ * ```typescript
+ * export const Server = E2B.Template("Server", {
+ *   main: "./src/server.mjs",
+ *   env: { GREETING: "hi" },
+ * });
+ * export type ServerEnv = E2B.InferEnv<typeof Server>;
+ * ```
+ *
+ * ### Bindings in the sandbox
+ * Bindings work inside a template program like in any other host.
+ *
+ * :::caution[Values are part of the template]
+ * Config and binding values are written into the template, so code in a
+ * sandbox can read them, `Redacted` ones included. Use egress secrets for
+ * credentials untrusted code must not see.
+ * :::
+ *
+ * **Example:** Read a volume from the program
+ * ```typescript
+ * export default class Program extends E2B.Template<Program>()(
+ *   "Program",
+ *   { main: import.meta.url },
+ *   Effect.gen(function* () {
+ *     const reports = yield* E2B.ReadVolume(Reports);
+ *     return {
+ *       fetch: Effect.gen(function* () {
+ *         return HttpServerResponse.text(yield* reports.readText("/latest.json"));
+ *       }).pipe(Effect.orDie),
+ *     };
+ *   }).pipe(Effect.provide(E2B.ReadVolumeHttp)),
+ * ) {}
+ * ```
+ *
+ * ### Configuration
+ * **Example:** Size, image and port
+ * ```typescript
+ * export default class Program extends E2B.Template<Program>()(
+ *   "Program",
+ *   { main: import.meta.url, image: "node:24-bookworm", cpuCount: 4, memoryMB: 8192, port: 8080 },
+ *   Effect.gen(function* () {
+ *     return { fetch: Effect.succeed(HttpServerResponse.text("ok")) };
+ *   }),
+ * ) {}
+ * ```
+ *
  * **Example:** Sandboxes from the template, in a Worker
  * ```typescript
  * const sandboxes = yield* E2B.CreateSandbox(Agent);
