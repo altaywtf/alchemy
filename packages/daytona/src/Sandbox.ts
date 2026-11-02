@@ -14,10 +14,9 @@ import {
   userLabels,
 } from "./internal/Labels.ts";
 import { resolveName } from "./internal/Names.ts";
+import { resolved, type Ref } from "./internal/Ref.ts";
 import { toMinutes, waitForState, waitUntilGone } from "./internal/Wait.ts";
 import type { Providers } from "./Providers.ts";
-
-type Ref<T> = T | Effect.Effect<T, never, Providers>;
 
 /** A snapshot, by name. Accepts a `Daytona.Snapshot` or `{ name }`. */
 export type SandboxSnapshot = { readonly name: string };
@@ -182,8 +181,7 @@ export type Sandbox = Resource<
  */
 export const Sandbox = Resource<Sandbox>("Daytona.Sandbox");
 
-const resolveRef = <T>(ref: Ref<T>): Effect.Effect<T, never, Providers> =>
-  Effect.isEffect(ref) ? ref : Effect.succeed(ref);
+const resolveRef = <T>(ref: Ref<T>) => Effect.succeed(resolved(ref));
 
 const csv = (list: string[] | undefined) => (list === undefined ? undefined : list.join(","));
 const fromCsv = (value: string | undefined) =>

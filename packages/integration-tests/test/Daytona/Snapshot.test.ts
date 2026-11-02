@@ -1,0 +1,88 @@
+import * as Daytona from "@alchemy.run/daytona";
+import { expect } from "@alchemy.run/test";
+import * as Test from "@alchemy.run/test/Alchemy";
+import * as sandboxes from "@distilled.cloud/daytona/sandbox";
+import * as snapshots from "@distilled.cloud/daytona/snapshots";
+import * as Effect from "effect/Effect";
+
+const { test } = Test.make({ providers: Daytona.providers() });
+
+const find = (id: string) =>
+  snapshots.getSnapshot({ id }).pipe(Effect.catchTag("SnapshotNotFound", () => Effect.undefined));
+
+test.provider(
+  "a snapshot needs exactly one source and a fixed image tag",
+  (stack) =>
+    Effect.gen(function* () {
+      yield* stack.destroy();
+      const none = yield* stack.deploy(Daytona.Snapshot("Bad", {})).pipe(Effect.flip);
+      expect(String(none)).toContain("exactly one of");
+      const latest = yield* stack
+        .deploy(Daytona.Snapshot("Bad", { image: "node:latest" }))
+        .pipe(Effect.flip);
+      expect(String(latest)).toContain("fixed tag");
+      const copy = yield* stack
+        .deploy(Daytona.Snapshot("Bad", { dockerfile: { content: "FROM node:22\nCOPY . /app\n" } }))
+        .pipe(Effect.flip);
+      expect(String(copy)).toContain("can't copy local files");
+      yield* stack.destroy();
+    }),
+  { tags: ["provider:daytona", "live"], timeout: 60_000 },
+);
+
+test.provider.skipIf(!!process.env.FAST)(
+  "pull an image, build a Dockerfile, and capture a warm base from a sandbox",
+  (stack) =>
+    Effect.gen(function* () {
+      yield* stack.destroy();
+
+      const { pulled, built, warm } = yield* stack.deploy(
+        Effect.gen(function* () {
+          const pulled = yield* Daytona.Snapshot("Pulled", {
+            image: "node:22-bookworm-slim",
+            cpu: 1,
+            memory: 1,
+            disk: 3,
+          });
+          const built = yield* Daytona.Snapshot("Built", {
+            dockerfile: {
+              content: "FROM node:22-bookworm-slim\nRUN echo built > /etc/alchemy-marker\n",
+            },
+            cpu: 1,
+            memory: 1,
+            disk: 3,
+          });
+          const warm = yield* Daytona.Snapshot("Warm", {
+            from: pulled,
+            run: ["echo warm > /home/daytona/marker", "test -f /home/daytona/marker"],
+          });
+          return { pulled, built, warm };
+        }),
+      );
+      expect(pulled.state).toEqual("active");
+      expect(built.state).toEqual("active");
+      expect(warm.state).toEqual("active");
+      expect(warm.sourceSandboxId).toBeDefined();
+      // The build sandbox is gone once the snapshot is captured.
+      const build = yield* sandboxes
+        .getSandbox({ sandboxIdOrName: warm.sourceSandboxId! })
+        .pipe(Effect.catchTag("SandboxNotFound", () => Effect.undefined));
+      expect(
+        build === undefined || build.state === "destroyed" || build.state === "destroying",
+      ).toBe(true);
+
+      // A deactivated snapshot is reactivated by deploy.
+      yield* snapshots.deactivateSnapshot({ id: pulled.snapshotId });
+      const reactivated = yield* stack.deploy(
+        Daytona.Snapshot("Pulled", { image: "node:22-bookworm-slim", cpu: 1, memory: 1, disk: 3 }),
+      );
+      expect(reactivated.snapshotId).toEqual(pulled.snapshotId);
+      expect(reactivated.state).toEqual("active");
+
+      yield* stack.destroy();
+      expect(yield* find(pulled.snapshotId)).toBeUndefined();
+      expect(yield* find(built.snapshotId)).toBeUndefined();
+      expect(yield* find(warm.snapshotId)).toBeUndefined();
+    }),
+  { tags: ["provider:daytona", "live", "slow"], timeout: 1_200_000 },
+);

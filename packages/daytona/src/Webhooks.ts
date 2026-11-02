@@ -53,14 +53,12 @@ export type Webhooks = Resource<
 export const Webhooks = Resource<Webhooks>("Daytona.Webhooks");
 
 const status = (organizationId: string) =>
-  webhooks
-    .getWebhookControllerInitializationStatus({ organizationId })
-    .pipe(
-      Effect.map((s) => ({
-        ...s,
-        state: s.svixApplicationId ? "ready" : s.lastError ? "error" : "pending",
-      })),
-    );
+  webhooks.getWebhookControllerInitializationStatus({ organizationId }).pipe(
+    Effect.map((s) => ({
+      ...s,
+      state: s.svixApplicationId ? "ready" : s.lastError ? "error" : "pending",
+    })),
+  );
 
 export const WebhooksProvider = () =>
   Provider.effect(

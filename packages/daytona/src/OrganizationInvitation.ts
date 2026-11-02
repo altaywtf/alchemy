@@ -4,9 +4,8 @@ import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import { currentOrganizationId } from "./internal/Organization.ts";
+import { resolved, type Ref } from "./internal/Ref.ts";
 import type { Providers } from "./Providers.ts";
-
-type Ref<T> = T | Effect.Effect<T, never, Providers>;
 
 /** A role, by id. Accepts a `Daytona.OrganizationRole` or `{ roleId }`. */
 export type RoleRef = { readonly roleId: string };
@@ -69,9 +68,7 @@ export const OrganizationInvitation = Resource<OrganizationInvitation>(
 );
 
 const resolveRoles = (roles: OrganizationInvitationProps["roles"]) =>
-  Effect.forEach(roles ?? [], (r) =>
-    Effect.isEffect(r) ? Effect.map(r, (x) => x.roleId) : Effect.succeed(r.roleId),
-  );
+  Effect.succeed((roles ?? []).map((r) => resolved(r).roleId));
 
 const toAttributes = (
   i: organizations.OrganizationInvitation,

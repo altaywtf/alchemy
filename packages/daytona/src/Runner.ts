@@ -6,9 +6,8 @@ import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import { isOwnedName, resolveName } from "./internal/Names.ts";
+import { resolved, type Ref } from "./internal/Ref.ts";
 import type { Providers } from "./Providers.ts";
-
-type Ref<T> = T | Effect.Effect<T, never, Providers>;
 
 /** A region, by id. Accepts a `Daytona.Region` or `{ regionId }`. */
 export type RunnerRegion = { readonly regionId: string };
@@ -62,8 +61,7 @@ export type Runner = Resource<"Daytona.Runner", RunnerProps, RunnerAttributes, n
  */
 export const Runner = Resource<Runner>("Daytona.Runner");
 
-const regionId = (region: RunnerProps["region"]) =>
-  Effect.isEffect(region) ? Effect.map(region, (r) => r.regionId) : Effect.succeed(region.regionId);
+const regionId = (region: RunnerProps["region"]) => Effect.succeed(resolved(region).regionId);
 
 const getById = (id: string) =>
   runners.getRunner({ id }).pipe(Effect.catchTag("RunnerNotFound", () => Effect.undefined));

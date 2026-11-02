@@ -3,10 +3,8 @@ import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
-import type * as Effect_ from "effect/Effect";
+import { resolved, type Ref } from "./internal/Ref.ts";
 import type { Providers } from "./Providers.ts";
-
-type Ref<T> = T | Effect_.Effect<T, never, Providers>;
 
 /** A snapshot, by name. Accepts a `Daytona.Snapshot` or `{ name }`. */
 export type WarmPoolSnapshot = { readonly name: string };
@@ -69,7 +67,7 @@ const toAttributes = (p: warmPools.WarmPool): WarmPoolAttributes => ({
 });
 
 const snapshotName = (snapshot: WarmPoolProps["snapshot"]) =>
-  Effect.isEffect(snapshot) ? Effect.map(snapshot, (s) => s.name) : Effect.succeed(snapshot.name);
+  Effect.succeed(resolved(snapshot).name);
 
 export const WarmPoolProvider = () =>
   Provider.effect(

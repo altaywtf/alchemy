@@ -6,10 +6,9 @@ import * as Effect from "effect/Effect";
 import type * as Redacted from "effect/Redacted";
 import { isOwnedName, resolveName } from "./internal/Names.ts";
 import { currentOrganizationId } from "./internal/Organization.ts";
+import { resolved, type Ref } from "./internal/Ref.ts";
 import type { RoleRef } from "./OrganizationInvitation.ts";
 import type { Providers } from "./Providers.ts";
-
-type Ref<T> = T | Effect.Effect<T, never, Providers>;
 
 export interface IdentityProviderProps {
   /** Display name. If omitted, generated from the stack, stage and logical ID. */
@@ -89,9 +88,7 @@ const toAttributes = (
 });
 
 const roleIds = (roles: IdentityProviderProps["defaultRoles"]) =>
-  Effect.forEach(roles ?? [], (r) =>
-    Effect.isEffect(r) ? Effect.map(r, (x) => x.roleId) : Effect.succeed(r.roleId),
-  );
+  Effect.succeed((roles ?? []).map((r) => resolved(r).roleId));
 
 export const IdentityProviderProvider = () =>
   Provider.effect(

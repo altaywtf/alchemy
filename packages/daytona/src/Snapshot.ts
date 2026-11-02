@@ -13,10 +13,9 @@ import * as Stream from "effect/Stream";
 import { createInternalLabels } from "./internal/Labels.ts";
 import { isOwnedName, resolveName } from "./internal/Names.ts";
 import { runCommand } from "./internal/Process.ts";
+import { resolved, type Ref } from "./internal/Ref.ts";
 import { waitForState, waitUntilGone } from "./internal/Wait.ts";
 import type { Providers } from "./Providers.ts";
-
-type Ref<T> = T | Effect.Effect<T, never, Providers>;
 
 /** A snapshot, by name. Accepts a `Daytona.Snapshot` or `{ name }`. */
 export type SnapshotRef = { readonly name: string };
@@ -207,11 +206,7 @@ const sha256 = (value: unknown) =>
   Effect.sync(() => createHash("sha256").update(JSON.stringify(value)).digest("hex"));
 
 const refName = <T extends { readonly name: string }>(ref: Ref<T> | undefined) =>
-  ref === undefined
-    ? Effect.undefined
-    : Effect.isEffect(ref)
-      ? Effect.map(ref, (r) => r.name)
-      : Effect.succeed(ref.name);
+  Effect.succeed(ref === undefined ? undefined : resolved(ref).name);
 
 const checkImage = (image: string) => {
   const last = image.split("/").at(-1) ?? image;

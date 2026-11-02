@@ -5,10 +5,9 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { currentOrganizationId } from "./internal/Organization.ts";
+import { resolved, type Ref } from "./internal/Ref.ts";
 import type { MemberRole, RoleRef } from "./OrganizationInvitation.ts";
 import type { Providers } from "./Providers.ts";
-
-type Ref<T> = T | Effect.Effect<T, never, Providers>;
 
 export interface OrganizationMemberProps {
   /** The member, by user ID or email. Changing it replaces the resource. */
@@ -123,9 +122,7 @@ export const OrganizationMemberProvider = () =>
           role: member.role,
           roleIds: member.assignedRoles.map((r) => r.id).sort(),
         };
-        const roleIds = (yield* Effect.forEach(news.roles ?? [], (r) =>
-          Effect.isEffect(r) ? Effect.map(r, (x) => x.roleId) : Effect.succeed(r.roleId),
-        )).sort();
+        const roleIds = (news.roles ?? []).map((r) => resolved(r).roleId).sort();
         if (
           member.role !== news.role ||
           !deepEqual(member.assignedRoles.map((r) => r.id).sort(), roleIds)
