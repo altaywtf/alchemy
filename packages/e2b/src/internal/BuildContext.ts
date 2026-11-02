@@ -15,6 +15,7 @@ import * as zlib from "node:zlib";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import type * as PlatformError from "effect/PlatformError";
 import { UnsupportedDockerfileInstruction } from "../Errors.ts";
 
 export interface ContextFile {
@@ -49,7 +50,7 @@ export const resolveSource = Effect.fn(function* (context: string, relative: str
   const path = yield* Path.Path;
   const normalized = relative.replace(/^\.\/+/, "").replace(/\/+$/, "") || ".";
 
-  const walk = (rel: string): Effect.Effect<ContextFile[], unknown> =>
+  const walk = (rel: string): Effect.Effect<ContextFile[], PlatformError.PlatformError> =>
     Effect.gen(function* () {
       const absolute = path.join(context, rel);
       const info = yield* fs.stat(absolute);

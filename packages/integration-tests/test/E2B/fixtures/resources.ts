@@ -1,0 +1,14 @@
+import * as E2B from "@alchemy.run/e2b";
+import * as Redacted from "effect/Redacted";
+
+/** The template the binding fixture's sandboxes boot from. */
+export const BindingAgent = E2B.Template("BindingAgent", {
+  fromTemplate: "base",
+  run: ["echo bound > /home/user/marker.txt"],
+});
+
+/** A volume the fixture reads and writes through the volume bindings. */
+export const SharedVolume = E2B.Volume("SharedVolume", {});
+
+/** A secret the fixture rotates with WriteSecret. */
+export const RotatedSecret = E2B.Secret("RotatedSecret", { value: Redacted.make("first") });

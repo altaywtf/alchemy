@@ -75,7 +75,12 @@ export interface TemplateSource {
   readonly fromTemplate?: string;
   /** Shell commands run after the base, as extra `RUN` steps. */
   readonly run?: ReadonlyArray<string>;
-  /** In-memory files to copy, as `{ path, contents }` → copied to `path` from the context root. */
+  /**
+   * An in-memory build context: `COPY` sources in the Dockerfile resolve
+   * against these paths before the `context` directory, so a template can be
+   * built where there is no filesystem (at runtime, in a Worker). A file with
+   * a `dest` is also copied there on its own, after the Dockerfile's steps.
+   */
   readonly files?: ReadonlyArray<InlineFile & { readonly dest?: string }>;
   /** Environment variables set in the image (`ENV`). */
   readonly env?: Readonly<Record<string, string>>;
@@ -133,6 +138,9 @@ export interface TemplateBuildResult {
   readonly public: boolean;
 }
 
+/** A context-relative path without `./` or leading/trailing slashes. */
+const normalize = (path: string) => path.replace(/^(\.\/|\/)+/, "").replace(/\/+$/, "") || ".";
+
 const sourceCount = (source: TemplateSource) =>
   [source.image, source.dockerfile, source.fromTemplate].filter((x) => x !== undefined).length;
 
@@ -173,24 +181,22 @@ export const planTemplateBuild = Effect.fn(function* (spec: TemplateBuildSpec) {
     ...(spec.env && Object.keys(spec.env).length > 0
       ? [{ type: "ENV" as const, args: Object.entries(spec.env).flat() }]
       : []),
-    ...(spec.files ?? []).map((file) => ({
-      type: "COPY" as const,
-      args: [
-        `__inline__/${file.path.replace(/^\/+/, "")}`,
-        file.dest ?? `/${file.path.replace(/^\/+/, "")}`,
-        "",
-        "",
-      ],
-    })),
+    ...(spec.files ?? []).flatMap((file) =>
+      file.dest === undefined
+        ? []
+        : [{ type: "COPY" as const, args: [normalize(file.path), file.dest, "", ""] }],
+    ),
     ...(spec.run ?? []).map((command) => ({ type: "RUN" as const, args: [command] })),
   ];
 
-  const inline = new Map(
-    inlineFiles(spec.files ?? []).map((file) => [
-      `__inline__/${file.path}`,
-      { ...file, path: file.path },
-    ]),
-  );
+  const inline = new Map(inlineFiles(spec.files ?? []).map((file) => [file.path, file]));
+  /** In-memory files under a COPY source: the file itself, or everything below a directory. */
+  const inlineUnder = (src: string) => {
+    const root = normalize(src);
+    return [...inline.values()].filter(
+      (file) => root === "." || file.path === root || file.path.startsWith(`${root}/`),
+    );
+  };
 
   const uploads = new Map<string, ReadonlyArray<ContextFile>>();
   const steps: PlannedStep[] = [];
@@ -200,15 +206,14 @@ export const planTemplateBuild = Effect.fn(function* (spec: TemplateBuildSpec) {
       continue;
     }
     const [src, dest] = step.args as [string, string];
-    const files = inline.has(src)
-      ? [inline.get(src)!]
-      : yield* requireFiles(src, yield* resolveSource(context, src));
+    const fromMemory = inlineUnder(src);
+    const files =
+      fromMemory.length > 0
+        ? fromMemory
+        : yield* requireFiles(src, yield* resolveSource(context, src));
     const hash = filesHash(src, dest, files);
     uploads.set(hash, files);
-    // An inline file is archived under its own path, so its COPY source is that path.
-    const args = [...step.args];
-    if (inline.has(src)) args[0] = inline.get(src)!.path;
-    steps.push({ type: "COPY", args, filesHash: hash });
+    steps.push({ type: "COPY", args: [...step.args], filesHash: hash });
   }
 
   const hash = crypto

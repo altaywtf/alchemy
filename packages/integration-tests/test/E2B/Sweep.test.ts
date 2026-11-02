@@ -1,0 +1,94 @@
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as E2B from "@alchemy.run/e2b";
+import { expect } from "@alchemy.run/test";
+import * as Test from "@alchemy.run/test/Alchemy";
+import * as sandboxes from "@distilled.cloud/e2b/sandboxes";
+import * as secrets from "@distilled.cloud/e2b/secrets";
+import * as Effect from "effect/Effect";
+import * as HttpClient from "effect/http/HttpClient";
+import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
+import { BindingAgent, RotatedSecret, SharedVolume } from "./fixtures/resources.ts";
+import E2BWorker from "./fixtures/worker.ts";
+
+const providers = Layer.mergeAll(E2B.providers(), Cloudflare.providers());
+const { test } = Test.make({ providers });
+
+test.provider(
+  "destroying a host kills the sandboxes and deletes the secrets it created at runtime",
+  (stack) =>
+    Effect.gen(function* () {
+      yield* stack.destroy();
+      const { url } = yield* stack.deploy(
+        Effect.gen(function* () {
+          yield* BindingAgent;
+          yield* SharedVolume;
+          yield* RotatedSecret;
+          const worker = yield* E2BWorker;
+          return { url: worker.url.as<string>() };
+        }),
+      );
+      const name = `alchemy-${Test.defaultStage()}-leftover`
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "-");
+      const client = yield* HttpClient.HttpClient;
+      const res = yield* client
+        .get(`${url}/leftover?name=${name}`)
+        .pipe(Effect.retry({ schedule: Schedule.exponential("500 millis"), times: 8 }));
+      const left = (yield* res.json) as { sandboxId: string; secretId: string };
+      expect(res.status).toBe(200);
+
+      const alive = yield* sandboxes.getSandbox({ sandboxID: left.sandboxId });
+      expect(alive.metadata?.["alchemy::host"]).toBe("E2BWorker");
+
+      yield* stack.destroy();
+
+      const sandbox = yield* sandboxes.getSandbox({ sandboxID: left.sandboxId }).pipe(
+        Effect.map((s): string => s.state),
+        Effect.catchTag("NotFound", () => Effect.succeed("gone")),
+      );
+      expect(sandbox).toBe("gone");
+      const secret = yield* secrets.getSecret({ secretID: left.secretId }).pipe(
+        Effect.map((): string => "present"),
+        Effect.catchTag("NotFound", () => Effect.succeed("gone")),
+      );
+      expect(secret).toBe("gone");
+    }),
+  {
+    tags: ["provider:e2b", "provider:e2b:sweep", "provider:cloudflare", "live"],
+    timeout: 600_000,
+  },
+);
+
+test.provider(
+  "onDestroy: retain keeps the host's runtime sandboxes",
+  (stack) =>
+    Effect.gen(function* () {
+      yield* stack.destroy();
+      const output = yield* stack.deploy(
+        Effect.gen(function* () {
+          const agent = yield* BindingAgent;
+          // A sweep declared directly, as CreateSandbox({ onDestroy: "retain" }) declares it.
+          const sweep = yield* E2B.Sweep("RetainSweep", {
+            stamp: { "alchemy::host": "RetainProbe" },
+            kinds: ["sandboxes"],
+            onDestroy: "retain",
+          });
+          return { templateId: agent.templateId, sweep };
+        }),
+      );
+      const kept = yield* sandboxes.createSandbox({
+        templateID: output.templateId,
+        timeout: 120,
+        metadata: { "alchemy::host": "RetainProbe" },
+      });
+      yield* stack.destroy();
+      const state = yield* sandboxes.getSandbox({ sandboxID: kept.sandboxID }).pipe(
+        Effect.map((s): string => s.state),
+        Effect.catchTag("NotFound", () => Effect.succeed("gone")),
+      );
+      yield* sandboxes.deleteSandbox({ sandboxID: kept.sandboxID }).pipe(Effect.ignore);
+      expect(state).toBe("running");
+    }),
+  { tags: ["provider:e2b", "provider:e2b:sweep", "live"], timeout: 600_000 },
+);

@@ -30,3 +30,8 @@ export class SnapshotSetupFailed extends Data.TaggedError("E2B.SnapshotSetupFail
   readonly exitCode: number;
   readonly stderr: string;
 }> {}
+
+/** `E2B.CreateSandbox()` was bound without a base and `create()` was called without `templateID`. */
+export class SandboxBaseMissing extends Data.TaggedError("E2B.SandboxBaseMissing")<{
+  readonly message: string;
+}> {}
