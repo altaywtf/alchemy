@@ -5,49 +5,53 @@ import { makeOpenModalBinding } from "./BindingHttp.ts";
 import { CreateSecret, type SecretsClient } from "./CreateSecret.ts";
 import type { Environment } from "./Environment.ts";
 import { environmentOf, listAll } from "./internal.ts";
-import type { ModalClient } from "./ModalBindings.ts";
 import { lookupSecret, putSecret } from "./Secret.ts";
+
+/** The operations the client calls, resolved by `ModalBindings.withCredentials`. */
+const SecretsOps = Effect.all({
+  getOrCreate: secret.secretGetOrCreate,
+  delete: secret.deleteSecret,
+  list: secret.listSecret,
+});
+
+type SecretsOps = Effect.Success<typeof SecretsOps>;
 
 /** A secrets client over an environment name resolved per call. */
 export const makeSecretsClient = (
   environment: Effect.Effect<string | undefined>,
-  client: ModalClient,
+  ops: SecretsOps,
 ): SecretsClient => ({
-  put: (name, env) => client(Effect.flatMap(environment, (e) => putSecret(name, e, env))),
-  get: (name) => client(Effect.flatMap(environment, (e) => lookupSecret(name, e))),
+  put: (name, env) => Effect.flatMap(environment, (e) => putSecret(ops.getOrCreate, name, e, env)),
+  get: (name) => Effect.flatMap(environment, (e) => lookupSecret(ops.getOrCreate, name, e)),
   delete: (name) =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        const found = yield* lookupSecret(name, env);
-        if (!found) return;
-        yield* secret
-          .deleteSecret({ secretId: found.secretId })
-          .pipe(Effect.catchTag("SecretNotFound", () => Effect.void));
-      }),
-    ),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      const found = yield* lookupSecret(ops.getOrCreate, name, env);
+      if (!found) return;
+      yield* ops
+        .delete({ secretId: found.secretId })
+        .pipe(Effect.catchTag("SecretNotFound", () => Effect.void));
+    }),
   list: () =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        const items = yield* listAll(
-          (pagination) =>
-            secret
-              .listSecret({ environmentName: environmentOf(env), pagination })
-              .pipe(Effect.map((response) => response.items ?? [])),
-          (item) => item.createdAt,
-        );
-        return items.flatMap((item) => {
-          const name = item.label ?? item.metadata?.name;
-          return name ? [name] : [];
-        });
-      }),
-    ),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      const items = yield* listAll(
+        (pagination) =>
+          ops
+            .list({ environmentName: environmentOf(env), pagination })
+            .pipe(Effect.map((response) => response.items ?? [])),
+        (item) => item.createdAt,
+      );
+      return items.flatMap((item) => {
+        const name = item.label ?? item.metadata?.name;
+        return name ? [name] : [];
+      });
+    }),
 });
 
 /**
- * {@link CreateSecret} over Modal's API. Binds the deployer's Modal token onto
- * the host; Modal tokens act on the whole workspace.
+ * {@link CreateSecret} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the environment.
  *
  * @layer
  * @product Secret
@@ -57,9 +61,12 @@ export const CreateSecretHttp = Layer.effect(
   CreateSecret,
   makeOpenModalBinding({
     tag: "Modal.CreateSecret",
-    make: Effect.fn(function* (client, environment?: Environment) {
+    operations: SecretsOps,
+    role: "contributor",
+    environmentOf: (environment?: Environment) => environment?.name,
+    make: Effect.fn(function* (ops, environment?: Environment) {
       const name = environment ? yield* environment.name : Effect.succeed(undefined);
-      return makeSecretsClient(name, client);
+      return makeSecretsClient(name, ops);
     }),
   }),
 );

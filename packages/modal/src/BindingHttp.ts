@@ -1,3 +1,4 @@
+import type { Input } from "alchemy/Input";
 import type { ResourceLike } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -6,46 +7,88 @@ import * as ModalBindings from "./ModalBindings.ts";
 /**
  * Shared scaffolding for Modal's HTTP bindings. NOT exported from `index.ts`.
  *
- * At layer build it resolves the client runner ({@link ModalBindings.Client})
- * and the host `bind`. Per bound resource it binds the token pair onto the
- * host (deploy only) and builds the client: `make` runs in the construction
- * phase, so it reads the resource's attribute accessors there
- * (`yield* volume.volumeId`) and yields them per call.
+ * Every `{Cap}Http.ts` is a thin `Layer.effect(Cap, makeModalBinding({ … }))`:
+ * the operations it calls (resolved once with the host's credentials by
+ * {@link ModalBindings.withCredentials}), the environment role it grants the
+ * host's identity on the bound resource's environment, and the client it
+ * builds. `make` runs in the construction phase, so it reads the resource's
+ * attribute accessors there (`yield* volume.volumeId`) and yields them per call.
  */
-export const makeModalBinding = <Res extends ResourceLike, Client>(options: {
+
+/** A role on an environment, granted to the host's identity. */
+export type Role = ModalBindings.EnvironmentGrant["role"];
+
+const GrantRole = Effect.gen(function* () {
+  const bind = yield* ModalBindings.Bind;
+  return Effect.fn(function* (
+    label: TemplateStringsArray,
+    args: ReadonlyArray<unknown>,
+    environment: Input<string | undefined>,
+    role: Role,
+  ) {
+    if (!globalThis.__ALCHEMY_RUNTIME__) {
+      yield* bind(label, ...args)({ roles: [{ environment, role }] });
+    }
+  });
+});
+
+/** A binding over one resource that lives in an environment. */
+export const makeModalBinding = <
+  Res extends ResourceLike & { readonly environment: unknown },
+  Ops,
+  Client,
+>(options: {
   /** Fully qualified binding tag, e.g. `Modal.WriteQueue`. */
   readonly tag: string;
-  readonly make: (resource: Res, client: ModalBindings.ModalClient) => Effect.Effect<Client>;
+  /** The distilled operations the client calls, e.g. `Effect.all({ put: queue.putQueue })`. */
+  readonly operations: Effect.Effect<Ops, never, any>;
+  /** The role the host needs on the resource's environment. */
+  readonly role: Role;
+  readonly make: (resource: Res, ops: Ops) => Effect.Effect<Client>;
 }) =>
   Effect.gen(function* () {
-    const client = yield* ModalBindings.Client;
-    const bind = yield* ModalBindings.Bind;
+    const ops = yield* ModalBindings.withCredentials(options.operations);
+    const grant = yield* GrantRole;
     return Effect.fn(options.tag)(function* (resource: Res) {
-      if (!globalThis.__ALCHEMY_RUNTIME__) {
-        yield* bind`${options.tag}(${resource})`();
-      }
-      return yield* options.make(resource, client);
+      yield* grant(
+        labelOf(options.tag),
+        [resource],
+        resource.environment as Input<string | undefined>,
+        options.role,
+      );
+      return yield* options.make(resource, ops);
     });
   });
 
 /**
- * Shared scaffolding for open bindings (no bound resource): binds the token
- * pair onto the host once and builds the client.
+ * A binding with no bound resource (get-or-create by name at runtime): the
+ * role is granted on the environment `environmentOf(args)` names, the
+ * workspace default when `undefined`.
  */
-export const makeOpenModalBinding = <Args extends ReadonlyArray<unknown>, Client>(options: {
+export const makeOpenModalBinding = <Args extends ReadonlyArray<unknown>, Ops, Client>(options: {
   readonly tag: string;
-  readonly make: (client: ModalBindings.ModalClient, ...args: Args) => Effect.Effect<Client>;
+  readonly operations: Effect.Effect<Ops, never, any>;
+  readonly role: Role;
+  /** The environment the client acts in (an `Input`, read at deploy). */
+  readonly environmentOf: (...args: Args) => Input<string | undefined>;
+  readonly make: (ops: Ops, ...args: Args) => Effect.Effect<Client>;
 }) =>
   Effect.gen(function* () {
-    const client = yield* ModalBindings.Client;
-    const bind = yield* ModalBindings.Bind;
+    const ops = yield* ModalBindings.withCredentials(options.operations);
+    const grant = yield* GrantRole;
     return Effect.fn(options.tag)(function* (...args: Args) {
-      if (!globalThis.__ALCHEMY_RUNTIME__) {
-        yield* bind`${options.tag}`();
-      }
-      return yield* options.make(client, ...args);
+      yield* grant(openLabelOf(options.tag), [], options.environmentOf(...args), options.role);
+      return yield* options.make(ops, ...args);
     });
   });
+
+/** `<tag>(<resource>)` as a template label. */
+const labelOf = (tag: string): TemplateStringsArray =>
+  Object.assign([`${tag}(`, ")"], { raw: [`${tag}(`, ")"] }) as unknown as TemplateStringsArray;
+
+/** `<tag>` as a template label. */
+const openLabelOf = (tag: string): TemplateStringsArray =>
+  Object.assign([tag], { raw: [tag] }) as unknown as TemplateStringsArray;
 
 /** A stored value isn't JSON (e.g. a pickled value written by Modal's Python client). */
 export class ModalValueNotJson extends Data.TaggedError("Modal.ValueNotJson")<{

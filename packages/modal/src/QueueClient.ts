@@ -3,7 +3,17 @@ import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Effect from "effect/Effect";
 import { decodeJson, encodeJson } from "./BindingHttp.ts";
 import { seconds } from "./internal.ts";
-import type { ModalClient } from "./ModalBindings.ts";
+
+/** The queue operations the clients call, resolved by `ModalBindings.withCredentials`. */
+export const QueueOps = Effect.all({
+  clearQueue: queue.clearQueue,
+  getQueue: queue.getQueue,
+  putQueue: queue.putQueue,
+  queueLen: queue.queueLen,
+  queueNextItems: queue.queueNextItems,
+});
+
+export type QueueOps = Effect.Success<typeof QueueOps>;
 
 /** Which partition of a queue a call uses; omitted means the default partition. */
 export interface QueuePartitionOptions {
@@ -60,87 +70,77 @@ export interface ReadWriteQueueClient extends ReadQueueClient, WriteQueueClient 
 
 export const makeReadQueueClient = (
   queueId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: QueueOps,
 ): ReadQueueClient => ({
   queueId,
   take: <A>(options: Parameters<ReadQueueClient["take"]>[0] = {}) =>
-    client(
-      Effect.gen(function* () {
-        const id = yield* queueId;
-        const { values } = yield* queue.getQueue({
-          queueId: id,
-          partitionKey: options.partition,
-          nValues: options.count ?? 1,
-          timeout: seconds(options.timeout) ?? 0,
-        });
-        return yield* Effect.forEach(values ?? [], (value) => decodeJson<A>(value));
-      }),
-    ),
+    Effect.gen(function* () {
+      const id = yield* queueId;
+      const { values } = yield* ops.getQueue({
+        queueId: id,
+        partitionKey: options.partition,
+        nValues: options.count ?? 1,
+        timeout: seconds(options.timeout) ?? 0,
+      });
+      return yield* Effect.forEach(values ?? [], (value) => decodeJson<A>(value));
+    }),
   peek: <A>(options: QueuePartitionOptions = {}) =>
-    client(
-      Effect.gen(function* () {
-        const id = yield* queueId;
-        const { items } = yield* queue.queueNextItems({
-          queueId: id,
-          partitionKey: options.partition,
-          itemPollTimeout: 0,
-        });
-        return yield* Effect.forEach(items ?? [], (item) => decodeJson<A>(item.value ?? ""));
-      }),
-    ),
+    Effect.gen(function* () {
+      const id = yield* queueId;
+      const { items } = yield* ops.queueNextItems({
+        queueId: id,
+        partitionKey: options.partition,
+        itemPollTimeout: 0,
+      });
+      return yield* Effect.forEach(items ?? [], (item) => decodeJson<A>(item.value ?? ""));
+    }),
   len: (options = {}) =>
-    client(
-      Effect.gen(function* () {
-        const id = yield* queueId;
-        const response = yield* queue.queueLen({
-          queueId: id,
-          partitionKey: options.partition,
-          total: options.total,
-        });
-        return response.len ?? 0;
-      }),
-    ),
+    Effect.gen(function* () {
+      const id = yield* queueId;
+      const response = yield* ops.queueLen({
+        queueId: id,
+        partitionKey: options.partition,
+        total: options.total,
+      });
+      return response.len ?? 0;
+    }),
 });
 
 export const makeWriteQueueClient = (
   queueId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: QueueOps,
 ): WriteQueueClient => {
   const putMany: WriteQueueClient["putMany"] = (values, options = {}) =>
-    client(
-      Effect.gen(function* () {
-        const id = yield* queueId;
-        const encoded = yield* Effect.forEach([...values], (value) => encodeJson(value));
-        yield* queue.putQueue({
-          queueId: id,
-          values: encoded,
-          partitionKey: options.partition,
-          partitionTtlSeconds: seconds(options.partitionTtl),
-        });
-      }),
-    );
+    Effect.gen(function* () {
+      const id = yield* queueId;
+      const encoded = yield* Effect.forEach([...values], (value) => encodeJson(value));
+      yield* ops.putQueue({
+        queueId: id,
+        values: encoded,
+        partitionKey: options.partition,
+        partitionTtlSeconds: seconds(options.partitionTtl),
+      });
+    });
   return {
     queueId,
     put: (value, options) => putMany([value], options),
     putMany,
     clear: (options = {}) =>
-      client(
-        Effect.gen(function* () {
-          const id = yield* queueId;
-          yield* queue.clearQueue({
-            queueId: id,
-            partitionKey: options.partition,
-            allPartitions: options.all,
-          });
-        }),
-      ),
+      Effect.gen(function* () {
+        const id = yield* queueId;
+        yield* ops.clearQueue({
+          queueId: id,
+          partitionKey: options.partition,
+          allPartitions: options.all,
+        });
+      }),
   };
 };
 
 export const makeReadWriteQueueClient = (
   queueId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: QueueOps,
 ): ReadWriteQueueClient => ({
-  ...makeReadQueueClient(queueId, client),
-  ...makeWriteQueueClient(queueId, client),
+  ...makeReadQueueClient(queueId, ops),
+  ...makeWriteQueueClient(queueId, ops),
 });

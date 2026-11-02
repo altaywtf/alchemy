@@ -7,10 +7,10 @@ import { Resource } from "alchemy/Resource";
 import { sha256Object } from "alchemy/Util/sha256";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import { buildImage, type ImageBuildSpec } from "./ImageBuild.ts";
+import { buildImage, ImageBuildOps, type ImageBuildSpec } from "./ImageBuild.ts";
 import { checkCommands, lowerPlan, MODAL_CAPABILITIES } from "./ImagePlan.ts";
 import type { Providers } from "./Providers.ts";
-import { createSandbox } from "./SandboxClient.ts";
+import { createSandbox, SandboxOps } from "./SandboxClient.ts";
 
 /** A `run` command of a warm-base image exited non-zero. */
 export class ImageSetupFailed extends Data.TaggedError("Modal.ImageSetupFailed")<{
@@ -237,11 +237,14 @@ export const ImageProvider = () =>
           }
           // Ensure: Modal content-addresses builds, so this is a no-op for
           // inputs it has built before.
-          let imageId = yield* buildImage(appId, spec, { note: session.note });
+          let imageId = yield* buildImage(yield* ImageBuildOps, appId, spec, {
+            note: session.note,
+          });
           // Warm base: run setup in a sandbox and snapshot its filesystem.
           if (news.run && news.run.length > 0) {
             yield* session.note(`Running setup for image ${imageId}...`);
             const box = yield* createSandbox(
+              yield* SandboxOps,
               { appId },
               {
                 image: { imageId },

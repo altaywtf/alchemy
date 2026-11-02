@@ -5,9 +5,19 @@ import type { App } from "./App.ts";
 import { makeModalBinding } from "./BindingHttp.ts";
 import { WriteApp, type AppWriter } from "./WriteApp.ts";
 
+/** The operations the client calls, resolved by `ModalBindings.withCredentials`. */
+const WriteAppOps = Effect.all({
+  rollback: app.appRollback,
+  rollover: app.appRollover,
+  promote: app.promoteApp,
+  stop: app.stopApp,
+});
+
+type WriteAppOps = Effect.Success<typeof WriteAppOps>;
+
 /**
- * {@link WriteApp} over Modal's API. Binds the deployer's Modal token onto
- * the host; Modal tokens act on the whole workspace.
+ * {@link WriteApp} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the App's environment.
  *
  * @layer
  * @product App
@@ -17,24 +27,22 @@ export const WriteAppHttp = Layer.effect(
   WriteApp,
   makeModalBinding({
     tag: "Modal.WriteApp",
-    make: Effect.fn(function* (target: App, client) {
+    operations: WriteAppOps,
+    role: "contributor",
+    make: Effect.fn(function* (target: App, ops) {
       const appId = yield* target.appId;
       return {
         rollback: (options = {}) =>
-          client(
-            Effect.flatMap(appId, (id) => app.appRollback({ appId: id, version: options.version })),
-          ).pipe(Effect.asVoid),
-        rollover: () =>
-          client(Effect.flatMap(appId, (id) => app.appRollover({ appId: id }))).pipe(Effect.asVoid),
-        promote: (version) =>
-          client(Effect.flatMap(appId, (id) => app.promoteApp({ appId: id, version }))).pipe(
+          Effect.flatMap(appId, (id) => ops.rollback({ appId: id, version: options.version })).pipe(
             Effect.asVoid,
           ),
+        rollover: () =>
+          Effect.flatMap(appId, (id) => ops.rollover({ appId: id })).pipe(Effect.asVoid),
+        promote: (version) =>
+          Effect.flatMap(appId, (id) => ops.promote({ appId: id, version })).pipe(Effect.asVoid),
         stop: () =>
-          client(
-            Effect.flatMap(appId, (id) =>
-              app.stopApp({ appId: id, source: "APP_STOP_SOURCE_CLI" }),
-            ),
+          Effect.flatMap(appId, (id) =>
+            ops.stop({ appId: id, source: "APP_STOP_SOURCE_CLI" }),
           ).pipe(Effect.asVoid),
       } satisfies AppWriter;
     }),

@@ -5,14 +5,28 @@ import * as Layer from "effect/Layer";
 import type { App } from "./App.ts";
 import { makeModalBinding } from "./BindingHttp.ts";
 import { CreateImage, type ImageBuildOptions, type ImagesClient } from "./CreateImage.ts";
-import { buildImage } from "./ImageBuild.ts";
-import type { ModalClient } from "./ModalBindings.ts";
+import { buildImage, ImageBuildOps } from "./ImageBuild.ts";
+
+/** The operations the client calls, resolved by `ModalBindings.withCredentials`. */
+const ImagesOps = Effect.all({
+  build: ImageBuildOps,
+  getByTag: image.imageGetByTag,
+  publish: image.publishImage,
+  deleteName: image.deleteImageName,
+  delete: image.deleteImage,
+});
+
+type ImagesOps = Effect.Success<typeof ImagesOps>;
 
 const toBytes = (data: string | Uint8Array) =>
   Effect.sync(() => (typeof data === "string" ? new TextEncoder().encode(data) : data));
 
 /** Build one image from runtime options in `appId`. */
-export const buildFromOptions = Effect.fn(function* (appId: string, options: ImageBuildOptions) {
+export const buildFromOptions = Effect.fn(function* (
+  ops: ImageBuildOps,
+  appId: string,
+  options: ImageBuildOptions,
+) {
   // Parsed to normalize it; Modal's builder rejects what it can't run.
   // (The plan-time capability check lives with BuildPlan, which imports the
   // bundler and so stays out of runtime bundles.)
@@ -27,7 +41,7 @@ export const buildFromOptions = Effect.fn(function* (appId: string, options: Ima
     Object.entries(options.files ?? {}),
     ([filename, data]) => Effect.map(toBytes(data), (bytes) => ({ filename, data: bytes })),
   );
-  const imageId = yield* buildImage(appId, {
+  const imageId = yield* buildImage(ops, appId, {
     dockerTag: options.dockerfile
       ? undefined
       : options.from
@@ -46,48 +60,40 @@ export const buildFromOptions = Effect.fn(function* (appId: string, options: Ima
 /** An images client over an app id resolved per call. */
 export const makeImagesClient = (
   appId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: ImagesOps,
   environment: Effect.Effect<string | undefined> = Effect.succeed(undefined),
 ): ImagesClient => ({
   fromTag: (tag) =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        const found = yield* image
-          .imageGetByTag({ tag, environmentName: env ?? "" })
-          .pipe(Effect.catchTag("ImageNotFound", () => Effect.undefined));
-        return found?.imageId ? { imageId: found.imageId } : undefined;
-      }),
-    ),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      const found = yield* ops
+        .getByTag({ tag, environmentName: env ?? "" })
+        .pipe(Effect.catchTag("ImageNotFound", () => Effect.undefined));
+      return found?.imageId ? { imageId: found.imageId } : undefined;
+    }),
   publish: (target, tag) =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        yield* image.publishImage({ imageId: target.imageId, tag, environmentName: env ?? "" });
-      }),
-    ),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      yield* ops.publish({ imageId: target.imageId, tag, environmentName: env ?? "" });
+    }),
   unpublish: (tag) =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        yield* image
-          .deleteImageName({ tag: env ? `${env}/${tag}` : tag })
-          .pipe(Effect.catchTag("ImageNotFound", () => Effect.void));
-      }),
-    ),
-  build: (options) => client(Effect.flatMap(appId, (id) => buildFromOptions(id, options))),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      yield* ops
+        .deleteName({ tag: env ? `${env}/${tag}` : tag })
+        .pipe(Effect.catchTag("ImageNotFound", () => Effect.void));
+    }),
+  build: (options) => Effect.flatMap(appId, (id) => buildFromOptions(ops.build, id, options)),
   delete: (target) =>
-    client(
-      image.deleteImage({ imageId: target.imageId }).pipe(
-        Effect.catchTag("ImageNotFound", () => Effect.void),
-        Effect.asVoid,
-      ),
+    ops.delete({ imageId: target.imageId }).pipe(
+      Effect.catchTag("ImageNotFound", () => Effect.void),
+      Effect.asVoid,
     ),
 });
 
 /**
- * {@link CreateImage} over Modal's API. Binds the deployer's Modal token onto
- * the host; Modal tokens act on the whole workspace.
+ * {@link CreateImage} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the App's environment.
  *
  * @layer
  * @product Image
@@ -97,10 +103,12 @@ export const CreateImageHttp = Layer.effect(
   CreateImage,
   makeModalBinding({
     tag: "Modal.CreateImage",
-    make: Effect.fn(function* (app: App, client) {
+    operations: ImagesOps,
+    role: "contributor",
+    make: Effect.fn(function* (app: App, ops) {
       const appId = yield* app.appId;
       const environment = yield* app.environment;
-      return makeImagesClient(appId, client, environment);
+      return makeImagesClient(appId, ops, environment);
     }),
   }),
 );

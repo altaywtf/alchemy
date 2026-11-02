@@ -109,14 +109,16 @@ export const Queue = Resource<Queue>("Modal.Queue");
 export type Queue = Resource<"Modal.Queue", QueueProps, QueueAttributes, never, Providers>;
 
 /** A queue by name, or `undefined` when missing. */
-export const lookupQueue = Effect.fn(function* (name: string, env: string | undefined) {
-  const found = yield* queue
-    .queueGetOrCreate({
-      deploymentName: name,
-      environmentName: environmentOf(env),
-      objectCreationType: "OBJECT_CREATION_TYPE_UNSPECIFIED",
-    })
-    .pipe(Effect.catchTag("QueueNotFound", () => Effect.undefined));
+export const lookupQueue = Effect.fn(function* (
+  getOrCreate: Effect.Success<typeof queue.queueGetOrCreate>,
+  name: string,
+  env: string | undefined,
+) {
+  const found = yield* getOrCreate({
+    deploymentName: name,
+    environmentName: environmentOf(env),
+    objectCreationType: "OBJECT_CREATION_TYPE_UNSPECIFIED",
+  }).pipe(Effect.catchTag("QueueNotFound", () => Effect.undefined));
   if (!found?.queueId) return undefined;
   return { queueId: found.queueId, name, environment: env } satisfies QueueAttributes;
 });
@@ -125,8 +127,12 @@ export const lookupQueue = Effect.fn(function* (name: string, env: string | unde
  * Get a queue by name, creating it when missing: the one implementation behind
  * {@link Queue}'s reconcile and the runtime {@link CreateQueue} client.
  */
-export const ensureQueue = Effect.fn(function* (name: string, env: string | undefined) {
-  const created = yield* queue.queueGetOrCreate({
+export const ensureQueue = Effect.fn(function* (
+  getOrCreate: Effect.Success<typeof queue.queueGetOrCreate>,
+  name: string,
+  env: string | undefined,
+) {
+  const created = yield* getOrCreate({
     deploymentName: name,
     environmentName: environmentOf(env),
     objectCreationType: "OBJECT_CREATION_TYPE_CREATE_IF_MISSING",
@@ -160,7 +166,7 @@ export const QueueProvider = () =>
             } satisfies QueueAttributes;
           }
         }
-        return yield* lookupQueue(name, env);
+        return yield* lookupQueue(yield* queue.queueGetOrCreate, name, env);
       });
 
       return {
@@ -184,7 +190,11 @@ export const QueueProvider = () =>
           const current = yield* observe(output?.queueId, name, envNameOf(news.environment));
           if (current) return current;
           yield* session.note(`Creating queue ${name}...`);
-          return yield* ensureQueue(name, envNameOf(news.environment));
+          return yield* ensureQueue(
+            yield* queue.queueGetOrCreate,
+            name,
+            envNameOf(news.environment),
+          );
         }),
         delete: Effect.fn(function* ({ output }) {
           yield* queue

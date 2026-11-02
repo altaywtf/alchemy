@@ -7,9 +7,20 @@ import { timestampOf } from "./internal.ts";
 import { ReadServer, type ServerReader } from "./ReadServer.ts";
 import type { Server } from "./Server.ts";
 
+/** The operations the client calls, resolved by `ModalBindings.withCredentials`. */
+const ReadServerOps = Effect.all({
+  stats: server.serverGetTimeRangeStats,
+  requests: server.fetchServerRequest,
+  requestCount: server.serverCountRequests,
+  metrics: server.serverGetMetrics,
+  containers: flash.listFlashContainer,
+});
+
+type ReadServerOps = Effect.Success<typeof ReadServerOps>;
+
 /**
- * {@link ReadServer} over Modal's API. Binds the deployer's Modal token onto
- * the host; Modal tokens act on the whole workspace.
+ * {@link ReadServer} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `viewer` role on the server's environment.
  *
  * @layer
  * @product Server
@@ -19,78 +30,70 @@ export const ReadServerHttp = Layer.effect(
   ReadServer,
   makeFunctionBinding({
     tag: "Modal.ReadServer",
-    make: ({ functionId }, client, _server: Server) =>
+    operations: ReadServerOps,
+    role: "viewer",
+    make: ({ functionId }, ops, _server: Server) =>
       Effect.succeed({
         stats: (range) =>
-          client(
-            Effect.flatMap(functionId, (id) =>
-              server.serverGetTimeRangeStats({
-                functionId: id,
-                since: timestampOf(range.since),
-                until: timestampOf(range.until ?? Date.now()),
-                containerId: range.containerId,
-              }),
-            ),
+          Effect.flatMap(functionId, (id) =>
+            ops.stats({
+              functionId: id,
+              since: timestampOf(range.since),
+              until: timestampOf(range.until ?? Date.now()),
+              containerId: range.containerId,
+            }),
           ),
         requests: (query) =>
-          client(
-            Effect.flatMap(functionId, (id) =>
-              server.fetchServerRequest(
-                "limit" in query
-                  ? { functionId: id, tail: { count: query.limit } }
-                  : {
-                      functionId: id,
-                      range: {
-                        since: timestampOf(query.since),
-                        until: timestampOf(query.until ?? Date.now()),
-                      },
+          Effect.flatMap(functionId, (id) =>
+            ops.requests(
+              "limit" in query
+                ? { functionId: id, tail: { count: query.limit } }
+                : {
+                    functionId: id,
+                    range: {
+                      since: timestampOf(query.since),
+                      until: timestampOf(query.until ?? Date.now()),
                     },
-              ),
-            ).pipe(
-              Effect.map((response) =>
-                (response.requests ?? []).map((request) => ({
-                  route: request.route,
-                  timestamp: request.timestamp,
-                  containerId: request.containerId,
-                  durationSeconds: request.durationSeconds,
-                  status: request.status,
-                })),
-              ),
+                  },
+            ),
+          ).pipe(
+            Effect.map((response) =>
+              (response.requests ?? []).map((request) => ({
+                route: request.route,
+                timestamp: request.timestamp,
+                containerId: request.containerId,
+                durationSeconds: request.durationSeconds,
+                status: request.status,
+              })),
             ),
           ),
         requestCount: (range) =>
-          client(
-            Effect.flatMap(functionId, (id) =>
-              server.serverCountRequests({
-                functionId: id,
-                since: timestampOf(range.since),
-                until: timestampOf(range.until ?? Date.now()),
-                bucketSecs: range.bucketSecs,
-              }),
-            ),
+          Effect.flatMap(functionId, (id) =>
+            ops.requestCount({
+              functionId: id,
+              since: timestampOf(range.since),
+              until: timestampOf(range.until ?? Date.now()),
+              bucketSecs: range.bucketSecs,
+            }),
           ),
         metrics: (range) =>
-          client(
-            Effect.flatMap(functionId, (id) =>
-              server.serverGetMetrics({
-                functionId: id,
-                since: timestampOf(range.since),
-                until: timestampOf(range.until ?? Date.now()),
-                bucketSecs: range.bucketSecs,
-                groups: range.groups ? [...range.groups] : undefined,
-              }),
-            ),
+          Effect.flatMap(functionId, (id) =>
+            ops.metrics({
+              functionId: id,
+              since: timestampOf(range.since),
+              until: timestampOf(range.until ?? Date.now()),
+              bucketSecs: range.bucketSecs,
+              groups: range.groups ? [...range.groups] : undefined,
+            }),
           ),
         containers: () =>
-          client(
-            Effect.flatMap(functionId, (id) => flash.listFlashContainer({ functionId: id })).pipe(
-              Effect.map((response) =>
-                (response.containers ?? []).map((container) => ({
-                  containerId: container.taskId ?? "",
-                  host: container.host,
-                  port: container.port,
-                })),
-              ),
+          Effect.flatMap(functionId, (id) => ops.containers({ functionId: id })).pipe(
+            Effect.map((response) =>
+              (response.containers ?? []).map((container) => ({
+                containerId: container.taskId ?? "",
+                host: container.host,
+                port: container.port,
+              })),
             ),
           ),
       } satisfies ServerReader),

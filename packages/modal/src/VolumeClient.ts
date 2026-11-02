@@ -8,7 +8,6 @@ import type {
 import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Effect from "effect/Effect";
 import type { HttpClientError } from "effect/http/HttpClientError";
-import type { ModalClient } from "./ModalBindings.ts";
 import {
   copyVolumeFiles,
   listVolumeFiles,
@@ -16,6 +15,7 @@ import {
   removeVolumeFile,
   writeVolumeFile,
   type VolumeFileEntry,
+  type VolumeFileOps,
   type VolumeTransferError,
 } from "./VolumeFiles.ts";
 
@@ -72,39 +72,37 @@ export interface ReadWriteVolumeClient extends ReadVolumeClient, WriteVolumeClie
 /** The read half of a volume client over `volumeId`. */
 export const makeReadVolumeClient = (
   volumeId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: VolumeFileOps,
 ): ReadVolumeClient => ({
   volumeId,
-  readFile: (path) => client(Effect.flatMap(volumeId, (id) => readVolumeFile(id, path))),
+  readFile: (path) => Effect.flatMap(volumeId, (id) => readVolumeFile(ops, id, path)),
   readFileString: (path) =>
-    client(
-      Effect.flatMap(volumeId, (id) => readVolumeFile(id, path)).pipe(
-        Effect.map((bytes) => new TextDecoder().decode(bytes)),
-      ),
+    Effect.flatMap(volumeId, (id) => readVolumeFile(ops, id, path)).pipe(
+      Effect.map((bytes) => new TextDecoder().decode(bytes)),
     ),
   listFiles: (path, options) =>
-    client(Effect.flatMap(volumeId, (id) => listVolumeFiles(id, path, options))),
+    Effect.flatMap(volumeId, (id) => listVolumeFiles(ops, id, path, options)),
 });
 
 /** The write half of a volume client over `volumeId`. */
 export const makeWriteVolumeClient = (
   volumeId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: VolumeFileOps,
 ): WriteVolumeClient => ({
   volumeId,
   writeFile: (path, data, options) =>
-    client(Effect.flatMap(volumeId, (id) => writeVolumeFile(id, path, data, options))),
+    Effect.flatMap(volumeId, (id) => writeVolumeFile(ops, id, path, data, options)),
   removeFile: (path, options) =>
-    client(Effect.flatMap(volumeId, (id) => removeVolumeFile(id, path, options))),
+    Effect.flatMap(volumeId, (id) => removeVolumeFile(ops, id, path, options)),
   copyFiles: (sources, destination, options) =>
-    client(Effect.flatMap(volumeId, (id) => copyVolumeFiles(id, sources, destination, options))),
+    Effect.flatMap(volumeId, (id) => copyVolumeFiles(ops, id, sources, destination, options)),
 });
 
 /** A read-write volume client over `volumeId`. */
 export const makeReadWriteVolumeClient = (
   volumeId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: VolumeFileOps,
 ): ReadWriteVolumeClient => ({
-  ...makeReadVolumeClient(volumeId, client),
-  ...makeWriteVolumeClient(volumeId, client),
+  ...makeReadVolumeClient(volumeId, ops),
+  ...makeWriteVolumeClient(volumeId, ops),
 });

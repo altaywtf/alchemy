@@ -31,7 +31,8 @@ const PROXY_ENV = { key: "MODAL_PROXY_KEY", secret: "MODAL_PROXY_SECRET" } as co
 export const FetchServerHttp = Layer.effect(
   FetchServer,
   Effect.gen(function* () {
-    const client = yield* ModalBindings.Client;
+    // No Modal API calls: the client only needs the host's HTTP client.
+    const http = yield* ModalBindings.withCredentials(HttpClient.HttpClient);
     const bind = yield* ModalBindings.Bind;
     const runtime = yield* CurrentRuntimeContext;
     // Deploy only: a host bundle never creates the token.
@@ -71,22 +72,19 @@ export const FetchServerHttp = Layer.effect(
       return {
         url: resolvedUrl,
         fetch: (request) =>
-          client(
-            Effect.gen(function* () {
-              const base = yield* resolvedUrl;
-              const target = new URL(request.url, "http://server");
-              // The Stack's own deployed server (allowed raw HTTP).
-              const http = yield* HttpClient.HttpClient;
-              return yield* http.execute(
-                request.pipe(
-                  HttpClientRequest.setUrl(
-                    `${base.replace(/\/$/, "")}${target.pathname}${target.search}`,
-                  ),
-                  HttpClientRequest.setHeaders(yield* headers),
+          Effect.gen(function* () {
+            const base = yield* resolvedUrl;
+            const target = new URL(request.url, "http://server");
+            // The Stack's own deployed server (allowed raw HTTP).
+            return yield* http.execute(
+              request.pipe(
+                HttpClientRequest.setUrl(
+                  `${base.replace(/\/$/, "")}${target.pathname}${target.search}`,
                 ),
-              );
-            }),
-          ),
+                HttpClientRequest.setHeaders(yield* headers),
+              ),
+            );
+          }),
       } satisfies ServerClient;
     });
   }),

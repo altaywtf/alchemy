@@ -1,8 +1,9 @@
 import * as environment from "@distilled.cloud/modal/environment";
 import * as service from "@distilled.cloud/modal/service";
+import * as workspace from "@distilled.cloud/modal/workspace";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
-import { Resource } from "alchemy/Resource";
+import { Resource, type ResourceBinding } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
@@ -117,7 +118,18 @@ export type ServiceUser = Resource<
   "Modal.ServiceUser",
   ServiceUserProps,
   ServiceUserAttributes,
-  never,
+  {
+    /**
+     * Roles contributed by bindings: a binding on a host grants the host's
+     * service user the role it needs on the bound resource's environment
+     * (`undefined` is the workspace default). The strongest role per
+     * environment wins.
+     */
+    environments?: Array<{
+      readonly environment: string | undefined;
+      readonly role: "viewer" | "contributor";
+    }>;
+  },
   Providers
 >;
 
@@ -129,11 +141,36 @@ const ROLE = {
 const roleOf = (role: string | undefined) =>
   role === ROLE.viewer ? "viewer" : role === ROLE.contributor ? "contributor" : undefined;
 
-/** The roles the props ask for, by environment name. */
-const desiredRoles = (props: ServiceUserProps) =>
-  Object.fromEntries(
-    (props.environments ?? []).map((entry) => [envNameOf(entry.environment) ?? "", entry.role]),
-  ) as Record<string, "viewer" | "contributor">;
+/**
+ * The roles the props and the bindings ask for, by environment name; the
+ * workspace default environment resolves to its name. A `contributor` grant
+ * beats a `viewer` grant for the same environment.
+ */
+const desiredRoles = Effect.fn(function* (
+  props: ServiceUserProps,
+  bindings: ReadonlyArray<ResourceBinding<ServiceUser["Binding"]>>,
+) {
+  const entries = [
+    ...(props.environments ?? []).map((entry) => ({
+      environment: envNameOf(entry.environment),
+      role: entry.role,
+    })),
+    ...bindings
+      .filter((binding) => (binding as { action?: string }).action !== "delete")
+      .flatMap((binding) => binding.data?.environments ?? []),
+  ];
+  let defaultName: string | undefined;
+  const roles: Record<string, "viewer" | "contributor"> = {};
+  for (const entry of entries) {
+    let name = entry.environment;
+    if (!name) {
+      defaultName ??= (yield* workspace.workspaceSettings({})).defaultEnvironmentName ?? "main";
+      name = defaultName;
+    }
+    if (roles[name] !== "contributor") roles[name] = entry.role;
+  }
+  return roles;
+});
 
 export const ServiceUserProvider = () =>
   Provider.effect(
@@ -162,7 +199,7 @@ export const ServiceUserProvider = () =>
           const found = yield* observe(output.name);
           return found?.serviceUserId === output.serviceUserId ? output : undefined;
         }),
-        reconcile: Effect.fn(function* ({ id, news, output, session }) {
+        reconcile: Effect.fn(function* ({ id, news, output, session, bindings }) {
           const name = output?.name ?? (yield* objectName(id, news.name));
           const scoped = news.scoped ?? true;
           // Observe: the user we created still exists (its secret lives only in state).
@@ -206,7 +243,7 @@ export const ServiceUserProvider = () =>
           for (const entry of user.environmentRoles ?? []) {
             if (entry.environmentName) observed[entry.environmentName] = roleOf(entry.role);
           }
-          const desired = scoped ? desiredRoles(news) : {};
+          const desired = scoped ? yield* desiredRoles(news, bindings) : {};
           for (const [env, role] of Object.entries(desired)) {
             if (observed[env] === role) continue;
             yield* environment.setEnvironmentRole({

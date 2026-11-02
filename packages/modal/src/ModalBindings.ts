@@ -1,6 +1,12 @@
-import { Credentials, CredentialsFromEnv, credentials } from "@distilled.cloud/modal/Credentials";
+import {
+  Credentials,
+  CredentialsFromEnv,
+  credentials,
+  withTaskCommandRouter,
+} from "@distilled.cloud/modal/Credentials";
 import { orDieCredentialsUnavailable } from "alchemy/Auth/Resolve";
 import * as Binding from "alchemy/Binding";
+import type { Input } from "alchemy/Input";
 import * as Output from "alchemy/Output";
 import { CurrentRuntimeContext } from "alchemy/RuntimeContext";
 import * as Context from "effect/Context";
@@ -10,38 +16,37 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import { ServiceUser } from "./ServiceUser.ts";
 
 /**
  * How a Modal binding reaches Modal from its host.
  *
- * Modal authenticates with a workspace token pair, and the API can't mint a
- * narrower one (tokens act on the whole workspace; service users can't be
- * created through the API). So:
+ * Modal grants access per environment, as a `viewer` or a `contributor`. So:
  *
- * - any host (a Cloudflare Worker, a Lambda, a Modal sandbox running an
- *   Effect program): {@link Bind} writes the deployer's token pair into the
- *   host's env (`MODAL_TOKEN_ID`, and `MODAL_TOKEN_SECRET` kept `Redacted`),
- *   and {@link Client} reads it back at runtime;
+ * - any host (a Cloudflare Worker, a Lambda, a Modal Function, Server or
+ *   Sandbox): {@link Bind} creates a scoped `Modal.ServiceUser` for the
+ *   host (`<host>ModalIdentity`), grants it the role each binding asks for
+ *   on the bound resource's environment, and binds its token pair into the
+ *   host's env (`MODAL_TOKEN_ID`, and `MODAL_TOKEN_SECRET` kept `Redacted`);
  * - no host (a script or a deploy-time Action): nothing is bound, and calls
  *   use the deployer's credentials.
  *
- * Isolation between workloads comes from Modal Environments: put the objects
- * a host should touch in their own environment.
- *
- * Import it as a namespace. A binding gets its `bind` from {@link Bind} and
- * its client runner from {@link Client} when its layer is built, then binds
- * behind its own `__ALCHEMY_RUNTIME__` guard:
+ * Import it as a namespace. A binding resolves its operations with
+ * {@link withCredentials} and gets its `bind` from {@link Bind} when its layer
+ * is built, then binds behind its own `__ALCHEMY_RUNTIME__` guard:
  *
  * ```ts
  * Effect.gen(function* () {
- *   const client = yield* ModalBindings.Client;
+ *   const put = yield* ModalBindings.withCredentials(modalQueue.putQueue);
  *   const bind = yield* ModalBindings.Bind;
  *   return Effect.fn(function* (queue: Queue) {
  *     if (!globalThis.__ALCHEMY_RUNTIME__) {
- *       yield* bind`Modal.WriteQueue(${queue})`();
+ *       yield* bind`Modal.WriteQueue(${queue})`({
+ *         roles: [{ environment: queue.environment, role: "contributor" }],
+ *       });
  *     }
  *     const queueId = yield* queue.queueId;
- *     return (value) => client(modalQueue.putQueue({ queueId: yield* queueId, values: [...] }));
+ *     return (value) => put({ queueId: yield* queueId, values: [...] });
  *   });
  * })
  * ```
@@ -52,77 +57,109 @@ export const TOKEN_ENV = {
   serverUrl: "MODAL_SERVER_URL",
 } as const;
 
+/** A role a binding needs in one environment. */
+export interface EnvironmentGrant {
+  /** The environment's name; `undefined` is the workspace default. */
+  readonly environment: Input<string | undefined>;
+  readonly role: "viewer" | "contributor";
+}
+
+/** What a Modal binding attaches to its host. */
+export interface HostBinding {
+  /** Environment roles the host's identity needs. */
+  readonly roles?: ReadonlyArray<EnvironmentGrant>;
+  /** Env vars the binding reads at runtime. */
+  readonly env?: Record<string, unknown>;
+}
+
 /** The signature {@link Bind} yields. */
 export type BindHost = (
   label: TemplateStringsArray,
   ...args: unknown[]
-) => (data?: { readonly env?: Record<string, unknown> }) => Effect.Effect<void>;
+) => (data?: HostBinding) => Effect.Effect<void>;
+
+type BindTarget = {
+  bind: (...args: unknown[]) => (data: unknown) => Effect.Effect<void>;
+};
+
+const labelled = (verb: string, label: TemplateStringsArray): TemplateStringsArray => {
+  const strings = [`${verb}(`, `, ${label[0]}`, ...label.slice(1)];
+  strings[strings.length - 1] += ")";
+  return Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray;
+};
 
 /**
  * The `bind` for a binding's layer: yield it while the layer is built, then
  * call it from the returned function behind a literal
  * `if (!globalThis.__ALCHEMY_RUNTIME__)` so the bundler drops it. On a host it
- * writes the deployer's Modal token pair (and `data.env`) into the host's
- * env; with no host it does nothing.
+ * grants `data.roles` to the host's service user and binds that user's token
+ * pair (and `data.env`) into the host's env; with no host it does nothing.
  */
 export const Bind: Effect.Effect<BindHost> = Effect.gen(function* () {
+  // Bindings only bind at deploy, so a host bundle captures nothing here
+  // and drops the identity resource.
   if (globalThis.__ALCHEMY_RUNTIME__) return () => () => Effect.void;
+  const Identity = yield* ServiceUser;
   const ambient = yield* Effect.serviceOption(Credentials);
-  return (_label: TemplateStringsArray, ..._args: unknown[]) =>
-    Effect.fn(function* (data?: { readonly env?: Record<string, unknown> }) {
+  return (label: TemplateStringsArray, ...args: unknown[]) =>
+    Effect.fn(function* (data: HostBinding = {}) {
       const host = yield* Binding.Host;
       if (host === undefined) return;
       const runtime = yield* CurrentRuntimeContext;
       if (runtime === undefined) return;
-      const resolve = Option.isSome(ambient)
-        ? ambient.value
-        : yield* Credentials.pipe(Effect.provide(CredentialsFromEnv));
-      // Binding initialization can't fail; the engine reports this defect as
-      // `CredentialsRequired`.
-      const creds = yield* resolve.pipe(orDieCredentialsUnavailable("Modal"));
-      yield* runtime.set(TOKEN_ENV.id, Output.literal(Redacted.value(creds.tokenId)));
-      yield* runtime.set(TOKEN_ENV.secret, Output.literal(creds.tokenSecret));
-      yield* runtime.set(TOKEN_ENV.serverUrl, Output.literal(creds.apiBaseUrl));
-      for (const [name, value] of Object.entries(data?.env ?? {})) {
+
+      // A binding that calls no Modal API (only `env`) needs no identity.
+      if (data.roles !== undefined && data.roles.length > 0) {
+        const user = yield* Identity(`${host.LogicalId}ModalIdentity`, { scoped: true });
+        yield* (user as unknown as BindTarget).bind(
+          labelled("Allow", label),
+          host,
+          ...args,
+        )({ environments: data.roles });
+        // The host talks to the deployer's Modal control plane.
+        const resolve = Option.isSome(ambient)
+          ? ambient.value
+          : yield* Credentials.pipe(Effect.provide(CredentialsFromEnv));
+        // Binding initialization can't fail; the engine reports this defect as
+        // `CredentialsRequired`.
+        const creds = yield* resolve.pipe(orDieCredentialsUnavailable("Modal"));
+        yield* runtime.set(TOKEN_ENV.id, user.tokenId);
+        yield* runtime.set(TOKEN_ENV.secret, user.tokenSecret);
+        yield* runtime.set(TOKEN_ENV.serverUrl, Output.literal(creds.apiBaseUrl));
+      }
+      for (const [name, value] of Object.entries(data.env ?? {})) {
         yield* runtime.set(name, Output.isOutput(value) ? value : Output.literal(value));
       }
     });
 });
 
-/** Runs a distilled Modal call with the binding's credentials and an HTTP client. */
-export type ModalClient = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-) => Effect.Effect<A, E, Exclude<R, Credentials | HttpClient.HttpClient>>;
-
-/**
- * The runner a binding calls distilled operations through, resolved once
- * when its layer is built: inside a deployed host, the token pair
- * {@link Bind} wrote into its env; otherwise (deploy, scripts, Actions) the
- * ambient Modal credentials, falling back to `MODAL_TOKEN_ID` /
- * `MODAL_TOKEN_SECRET`.
- */
-export const Client: Effect.Effect<ModalClient> = Effect.gen(function* () {
+/** The credentials and HTTP client distilled operations run with on this host. */
+const operationContext = Effect.gen(function* () {
   const runtime = yield* CurrentRuntimeContext;
   if (globalThis.__ALCHEMY_RUNTIME__ && runtime !== undefined) {
     const tokenId = yield* runtime.get<string>(TOKEN_ENV.id);
     const tokenSecret = yield* runtime.get<string | Redacted.Redacted<string>>(TOKEN_ENV.secret);
     if (tokenId !== undefined && tokenSecret !== undefined) {
       const serverUrl = yield* runtime.get<string>(TOKEN_ENV.serverUrl);
-      const layer = Layer.mergeAll(
-        credentials({
-          tokenId: Redacted.make(tokenId),
-          tokenSecret: Redacted.isRedacted(tokenSecret) ? tokenSecret : Redacted.make(tokenSecret),
-          apiBaseUrl: serverUrl,
-        }),
-        FetchHttpClient.layer,
-      );
-      const context = yield* Layer.build(layer).pipe(Effect.scoped);
-      return ((effect) => Effect.provide(effect, context)) as ModalClient;
+      return yield* Layer.build(
+        Layer.mergeAll(
+          credentials({
+            tokenId: Redacted.make(tokenId),
+            tokenSecret: Redacted.isRedacted(tokenSecret)
+              ? tokenSecret
+              : Redacted.make(tokenSecret),
+            apiBaseUrl: serverUrl,
+          }),
+          FetchHttpClient.layer,
+        ),
+      ).pipe(Effect.scoped);
     }
   }
+  // No bound identity (deploy, scripts, Actions): the ambient Modal
+  // credentials, falling back to `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`.
   const ambientCredentials = yield* Effect.serviceOption(Credentials);
   const ambientHttp = yield* Effect.serviceOption(HttpClient.HttpClient);
-  const context = Context.make(
+  return Context.make(
     Credentials,
     Option.isSome(ambientCredentials)
       ? ambientCredentials.value
@@ -135,5 +172,35 @@ export const Client: Effect.Effect<ModalClient> = Effect.gen(function* () {
         : yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer)),
     ),
   );
-  return ((effect) => Effect.provide(effect, context)) as ModalClient;
 });
+
+/**
+ * Resolve a distilled operation (or several, with `Effect.all`) once when
+ * the binding's layer is built: with the token pair {@link Bind} bound into
+ * the host, or the deployer's credentials when there is none.
+ *
+ * @example
+ * ```ts
+ * const ops = yield* ModalBindings.withCredentials(
+ *   Effect.all({ getFile: volume.volumeGetFile2, putFiles: volume.volumePutFiles2 }),
+ * );
+ * ```
+ */
+export const withCredentials: <Op>(operation: Effect.Effect<Op, never, any>) => Effect.Effect<Op> =
+  Effect.fn(function* <Op>(operation: Effect.Effect<Op, never, any>) {
+    const context = yield* operationContext;
+    return yield* (operation as Effect.Effect<Op>).pipe(Effect.provide(context));
+  });
+
+/**
+ * Resolve a task command router operation for one sandbox: the router runs
+ * per task, at a URL with its own JWT (from `sandboxGetCommandRouterAccess`),
+ * so its operations are resolved per call.
+ */
+export const withRouter =
+  <Op>(operation: Effect.Effect<Op, never, any>) =>
+  (access: { readonly url: string; readonly jwt: string }): Effect.Effect<Op> =>
+    (operation as Effect.Effect<Op>).pipe(
+      withTaskCommandRouter(access),
+      Effect.provide(FetchHttpClient.layer),
+    );

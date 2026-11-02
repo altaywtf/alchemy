@@ -6,9 +6,17 @@ import type { FunctionTarget } from "./InvokeFunction.ts";
 import { ScaleFunction, type FunctionScaler } from "./ScaleFunction.ts";
 import type { Server } from "./Server.ts";
 
+/** The operations the client calls, resolved by `ModalBindings.withCredentials`. */
+const ScaleFunctionOps = Effect.all({
+  schedulingParams: functions.functionGetSchedulingParams,
+  updateSchedulingParams: functions.functionUpdateSchedulingParams,
+});
+
+type ScaleFunctionOps = Effect.Success<typeof ScaleFunctionOps>;
+
 /**
- * {@link ScaleFunction} over Modal's API. Binds the deployer's Modal token
- * onto the host; Modal tokens act on the whole workspace.
+ * {@link ScaleFunction} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the function's environment.
  *
  * @layer
  * @product Function
@@ -18,30 +26,28 @@ export const ScaleFunctionHttp = Layer.effect(
   ScaleFunction,
   makeFunctionBinding({
     tag: "Modal.ScaleFunction",
-    make: ({ functionId }, client, _target: FunctionTarget | Server) =>
+    operations: ScaleFunctionOps,
+    role: "contributor",
+    make: ({ functionId }, ops, _target: FunctionTarget | Server) =>
       Effect.succeed({
         autoscaler: () =>
-          client(
-            Effect.flatMap(functionId, (id) =>
-              functions.functionGetSchedulingParams({ functionId: id }),
-            ).pipe(Effect.map((response) => response.autoscalerConfiguration?.settings)),
+          Effect.flatMap(functionId, (id) => ops.schedulingParams({ functionId: id })).pipe(
+            Effect.map((response) => response.autoscalerConfiguration?.settings),
           ),
         update: (settings) =>
-          client(
-            Effect.flatMap(functionId, (id) =>
-              functions.functionUpdateSchedulingParams({
-                functionId: id,
-                settings: {
-                  minContainers: settings.minContainers,
-                  maxContainers: settings.maxContainers,
-                  bufferContainers: settings.bufferContainers,
-                  scaleupWindow: settings.scaleupWindow,
-                  scaledownWindow: settings.scaledownWindow,
-                  targetConcurrencyFloat: settings.targetConcurrency,
-                },
-              }),
-            ).pipe(Effect.map((response) => response.currentSettings)),
-          ),
+          Effect.flatMap(functionId, (id) =>
+            ops.updateSchedulingParams({
+              functionId: id,
+              settings: {
+                minContainers: settings.minContainers,
+                maxContainers: settings.maxContainers,
+                bufferContainers: settings.bufferContainers,
+                scaleupWindow: settings.scaleupWindow,
+                scaledownWindow: settings.scaledownWindow,
+                targetConcurrencyFloat: settings.targetConcurrency,
+              },
+            }),
+          ).pipe(Effect.map((response) => response.currentSettings)),
       } satisfies FunctionScaler),
   }),
 );

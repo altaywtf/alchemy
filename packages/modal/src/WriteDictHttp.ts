@@ -2,12 +2,12 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { makeModalBinding } from "./BindingHttp.ts";
 import type { Dict } from "./Dict.ts";
-import { makeWriteDictClient } from "./DictClient.ts";
+import { DictOps, makeWriteDictClient } from "./DictClient.ts";
 import { WriteDict } from "./WriteDict.ts";
 
 /**
- * {@link WriteDict} over Modal's API. Binds the deployer's Modal token onto the
- * host; Modal tokens act on the whole workspace.
+ * {@link WriteDict} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the dict's environment.
  *
  * @layer
  * @product Dict
@@ -17,9 +17,11 @@ export const WriteDictHttp = Layer.effect(
   WriteDict,
   makeModalBinding({
     tag: "Modal.WriteDict",
-    make: Effect.fn(function* (dict: Dict, client) {
+    operations: DictOps,
+    role: "contributor",
+    make: Effect.fn(function* (dict: Dict, ops) {
       const dictId = yield* dict.dictId;
-      return makeWriteDictClient(dictId, client);
+      return makeWriteDictClient(dictId, ops);
     }),
   }),
 );

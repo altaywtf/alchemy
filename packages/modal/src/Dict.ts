@@ -109,14 +109,16 @@ export const Dict = Resource<Dict>("Modal.Dict");
 export type Dict = Resource<"Modal.Dict", DictProps, DictAttributes, never, Providers>;
 
 /** A dict by name, or `undefined` when missing. */
-export const lookupDict = Effect.fn(function* (name: string, env: string | undefined) {
-  const found = yield* dict
-    .dictGetOrCreate({
-      deploymentName: name,
-      environmentName: environmentOf(env),
-      objectCreationType: "OBJECT_CREATION_TYPE_UNSPECIFIED",
-    })
-    .pipe(Effect.catchTag("DictNotFound", () => Effect.undefined));
+export const lookupDict = Effect.fn(function* (
+  getOrCreate: Effect.Success<typeof dict.dictGetOrCreate>,
+  name: string,
+  env: string | undefined,
+) {
+  const found = yield* getOrCreate({
+    deploymentName: name,
+    environmentName: environmentOf(env),
+    objectCreationType: "OBJECT_CREATION_TYPE_UNSPECIFIED",
+  }).pipe(Effect.catchTag("DictNotFound", () => Effect.undefined));
   if (!found?.dictId) return undefined;
   return { dictId: found.dictId, name, environment: env } satisfies DictAttributes;
 });
@@ -125,8 +127,12 @@ export const lookupDict = Effect.fn(function* (name: string, env: string | undef
  * Get a dict by name, creating it when missing: the one implementation behind
  * {@link Dict}'s reconcile and the runtime {@link CreateDict} client.
  */
-export const ensureDict = Effect.fn(function* (name: string, env: string | undefined) {
-  const created = yield* dict.dictGetOrCreate({
+export const ensureDict = Effect.fn(function* (
+  getOrCreate: Effect.Success<typeof dict.dictGetOrCreate>,
+  name: string,
+  env: string | undefined,
+) {
+  const created = yield* getOrCreate({
     deploymentName: name,
     environmentName: environmentOf(env),
     objectCreationType: "OBJECT_CREATION_TYPE_CREATE_IF_MISSING",
@@ -158,7 +164,7 @@ export const DictProvider = () =>
             } satisfies DictAttributes;
           }
         }
-        return yield* lookupDict(name, env);
+        return yield* lookupDict(yield* dict.dictGetOrCreate, name, env);
       });
 
       return {
@@ -182,7 +188,7 @@ export const DictProvider = () =>
           const current = yield* observe(output?.dictId, name, envNameOf(news.environment));
           if (current) return current;
           yield* session.note(`Creating dict ${name}...`);
-          return yield* ensureDict(name, envNameOf(news.environment));
+          return yield* ensureDict(yield* dict.dictGetOrCreate, name, envNameOf(news.environment));
         }),
         delete: Effect.fn(function* ({ output }) {
           yield* dict

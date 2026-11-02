@@ -16,7 +16,7 @@ import { sha256Object } from "alchemy/Util/sha256";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import type { App } from "./App.ts";
-import { buildImage } from "./ImageBuild.ts";
+import { buildImage, ImageBuildOps } from "./ImageBuild.ts";
 import { checkCommands, lowerPlan, MODAL_CAPABILITIES } from "./ImagePlan.ts";
 import { envNameOf, objectName } from "./internal.ts";
 import type { Providers } from "./Providers.ts";
@@ -319,14 +319,19 @@ export const SandboxProvider = () =>
             PORT: String(port),
           };
           for (const [key, value] of Object.entries(news.env ?? {})) env[key] = envText(value);
-          const stored = yield* putSecret(secretName, app.environment, env);
+          const stored = yield* putSecret(
+            yield* secret.secretGetOrCreate,
+            secretName,
+            app.environment,
+            env,
+          );
 
           // Ensure the image: Modal reuses a cached build for the same inputs.
           const { spec, hash, command } = yield* prepare(news, port);
           const imageId =
             output !== undefined && output.hash === hash && output.appId === app.appId
               ? output.imageId
-              : yield* buildImage(app.appId, spec, { note: session.note });
+              : yield* buildImage(yield* ImageBuildOps, app.appId, spec, { note: session.note });
 
           return {
             imageId,

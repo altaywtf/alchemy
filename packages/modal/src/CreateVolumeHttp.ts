@@ -5,12 +5,22 @@ import { makeOpenModalBinding } from "./BindingHttp.ts";
 import { CreateVolume, type VolumeHandle, type VolumesClient } from "./CreateVolume.ts";
 import type { Environment } from "./Environment.ts";
 import { environmentOf, listAll } from "./internal.ts";
-import type { ModalClient } from "./ModalBindings.ts";
 import { ensureVolume, lookupVolume, type VolumeAttributes } from "./Volume.ts";
 import { makeReadWriteVolumeClient } from "./VolumeClient.ts";
+import { VolumeFileOps } from "./VolumeFiles.ts";
 
-const handleOf = (attributes: VolumeAttributes, client: ModalClient): VolumeHandle => ({
-  ...makeReadWriteVolumeClient(Effect.succeed(attributes.volumeId), client),
+/** The operations the client calls, resolved by `ModalBindings.withCredentials`. */
+const VolumesOps = Effect.all({
+  getOrCreate: volume.volumeGetOrCreate,
+  delete: volume.deleteVolume,
+  list: volume.listVolume,
+  client: VolumeFileOps,
+});
+
+type VolumesOps = Effect.Success<typeof VolumesOps>;
+
+const handleOf = (attributes: VolumeAttributes, ops: VolumesOps): VolumeHandle => ({
+  ...makeReadWriteVolumeClient(Effect.succeed(attributes.volumeId), ops.client),
   volumeId: Effect.succeed(attributes.volumeId),
   name: attributes.name,
   attributes,
@@ -19,49 +29,45 @@ const handleOf = (attributes: VolumeAttributes, client: ModalClient): VolumeHand
 /** A volumes client over an environment name resolved per call. */
 export const makeVolumesClient = (
   environment: Effect.Effect<string | undefined>,
-  client: ModalClient,
+  ops: VolumesOps,
 ): VolumesClient => ({
   getOrCreate: (name) =>
-    client(Effect.flatMap(environment, (env) => ensureVolume(name, env))).pipe(
-      Effect.map((attributes) => handleOf(attributes, client)),
+    Effect.flatMap(environment, (env) => ensureVolume(ops.getOrCreate, name, env)).pipe(
+      Effect.map((attributes) => handleOf(attributes, ops)),
     ),
   get: (name) =>
-    client(Effect.flatMap(environment, (env) => lookupVolume(name, env))).pipe(
-      Effect.map((attributes) => (attributes ? handleOf(attributes, client) : undefined)),
+    Effect.flatMap(environment, (env) => lookupVolume(ops.getOrCreate, name, env)).pipe(
+      Effect.map((attributes) => (attributes ? handleOf(attributes, ops) : undefined)),
     ),
   delete: (name) =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        const found = yield* lookupVolume(name, env);
-        if (!found) return;
-        yield* volume
-          .deleteVolume({ volumeId: found.volumeId, environmentName: environmentOf(env) })
-          .pipe(Effect.catchTag("VolumeNotFound", () => Effect.void));
-      }),
-    ),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      const found = yield* lookupVolume(ops.getOrCreate, name, env);
+      if (!found) return;
+      yield* ops
+        .delete({ volumeId: found.volumeId, environmentName: environmentOf(env) })
+        .pipe(Effect.catchTag("VolumeNotFound", () => Effect.void));
+    }),
   list: () =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        const items = yield* listAll(
-          (pagination) =>
-            volume
-              .listVolume({ environmentName: environmentOf(env), pagination })
-              .pipe(Effect.map((response) => response.items ?? [])),
-          (item) => item.createdAt,
-        );
-        return items.flatMap((item) => {
-          const name = item.label ?? item.metadata?.name;
-          return name ? [name] : [];
-        });
-      }),
-    ),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      const items = yield* listAll(
+        (pagination) =>
+          ops
+            .list({ environmentName: environmentOf(env), pagination })
+            .pipe(Effect.map((response) => response.items ?? [])),
+        (item) => item.createdAt,
+      );
+      return items.flatMap((item) => {
+        const name = item.label ?? item.metadata?.name;
+        return name ? [name] : [];
+      });
+    }),
 });
 
 /**
- * {@link CreateVolume} over Modal's API. Binds the deployer's Modal token
- * onto the host; Modal tokens act on the whole workspace.
+ * {@link CreateVolume} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the environment.
  *
  * @layer
  * @product Volume
@@ -71,9 +77,12 @@ export const CreateVolumeHttp = Layer.effect(
   CreateVolume,
   makeOpenModalBinding({
     tag: "Modal.CreateVolume",
-    make: Effect.fn(function* (client, environment?: Environment) {
+    operations: VolumesOps,
+    role: "contributor",
+    environmentOf: (environment?: Environment) => environment?.name,
+    make: Effect.fn(function* (ops, environment?: Environment) {
       const name = environment ? yield* environment.name : Effect.succeed(undefined);
-      return makeVolumesClient(name, client);
+      return makeVolumesClient(name, ops);
     }),
   }),
 );

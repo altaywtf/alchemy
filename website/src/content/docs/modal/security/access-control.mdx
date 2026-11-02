@@ -3,7 +3,7 @@ title: Access control
 description: Separate workloads with environments, member roles and scoped tokens.
 ---
 
-Modal tokens act on the whole workspace. A binding writes your token into its host. Keep workloads apart with environments.
+Every host gets its own scoped service user. A binding grants it `viewer` or `contributor` on the bound resource's environment, so keep workloads apart with environments.
 
 ## Restrict an environment
 

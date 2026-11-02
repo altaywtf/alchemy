@@ -8,6 +8,7 @@ import type { Providers } from "./Providers.ts";
 import {
   createPersistentSandbox,
   persistentSandboxHandle,
+  SandboxOps,
   type PersistentSandboxCreateOptions,
 } from "./SandboxClient.ts";
 
@@ -111,7 +112,7 @@ export const PersistentSandboxProvider = () =>
           // Ensure.
           yield* session.note("Creating persistent sandbox...");
           const { app: _app, ...options } = news;
-          const handle = yield* createPersistentSandbox(app, options);
+          const handle = yield* createPersistentSandbox(yield* SandboxOps, app, options);
           return {
             persistentSandboxId: handle.persistentSandboxId,
             appId: app.appId,
@@ -120,7 +121,11 @@ export const PersistentSandboxProvider = () =>
           };
         }),
         delete: Effect.fn(function* ({ output }) {
-          yield* persistentSandboxHandle(output.persistentSandboxId, output).terminate();
+          yield* persistentSandboxHandle(
+            yield* SandboxOps,
+            output.persistentSandboxId,
+            output,
+          ).terminate();
         }),
       };
     }),

@@ -2,7 +2,19 @@ import * as dict from "@distilled.cloud/modal/dict";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Effect from "effect/Effect";
 import { decodeJson, encodeJson } from "./BindingHttp.ts";
-import type { ModalClient } from "./ModalBindings.ts";
+
+/** The dict operations the clients call, resolved by `ModalBindings.withCredentials`. */
+export const DictOps = Effect.all({
+  clearDict: dict.clearDict,
+  dictContains: dict.dictContains,
+  dictContents: dict.dictContents,
+  dictLen: dict.dictLen,
+  dictPop: dict.dictPop,
+  getDict: dict.getDict,
+  updateDict: dict.updateDict,
+});
+
+export type DictOps = Effect.Success<typeof DictOps>;
 
 /**
  * Read access to one dict. Keys and values are JSON: `put("a", { n: 1 })`
@@ -43,114 +55,98 @@ export interface ReadWriteDictClient extends ReadDictClient, WriteDictClient {}
 
 export const makeReadDictClient = (
   dictId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: DictOps,
 ): ReadDictClient => ({
   dictId,
   get: <A>(key: unknown) =>
-    client(
-      Effect.gen(function* () {
-        const encodedKey = yield* encodeJson(key);
-        const id = yield* dictId;
-        const response = yield* dict.getDict({
-          dictId: id,
-          key: encodedKey,
-        });
-        return response.found && response.value !== undefined
-          ? yield* decodeJson<A>(response.value)
-          : undefined;
-      }),
-    ),
+    Effect.gen(function* () {
+      const encodedKey = yield* encodeJson(key);
+      const id = yield* dictId;
+      const response = yield* ops.getDict({
+        dictId: id,
+        key: encodedKey,
+      });
+      return response.found && response.value !== undefined
+        ? yield* decodeJson<A>(response.value)
+        : undefined;
+    }),
   contains: (key) =>
-    client(
-      Effect.gen(function* () {
-        const encodedKey = yield* encodeJson(key);
-        const id = yield* dictId;
-        const response = yield* dict.dictContains({
-          dictId: id,
-          key: encodedKey,
-        });
-        return response.found ?? false;
-      }),
-    ),
+    Effect.gen(function* () {
+      const encodedKey = yield* encodeJson(key);
+      const id = yield* dictId;
+      const response = yield* ops.dictContains({
+        dictId: id,
+        key: encodedKey,
+      });
+      return response.found ?? false;
+    }),
   len: () =>
-    client(
-      Effect.gen(function* () {
-        const id = yield* dictId;
-        const response = yield* dict.dictLen({ dictId: id });
-        return response.len ?? 0;
-      }),
-    ),
+    Effect.gen(function* () {
+      const id = yield* dictId;
+      const response = yield* ops.dictLen({ dictId: id });
+      return response.len ?? 0;
+    }),
   entries: <A>() =>
-    client(
-      Effect.gen(function* () {
-        const id = yield* dictId;
-        const { items } = yield* dict.dictContents({
-          dictId: id,
-          keys: true,
-          values: true,
-        });
-        return yield* Effect.forEach(items, (entry) =>
-          Effect.all([decodeJson(entry.key ?? ""), decodeJson<A>(entry.value ?? "")] as const),
-        );
-      }),
-    ),
+    Effect.gen(function* () {
+      const id = yield* dictId;
+      const { items } = yield* ops.dictContents({
+        dictId: id,
+        keys: true,
+        values: true,
+      });
+      return yield* Effect.forEach(items, (entry) =>
+        Effect.all([decodeJson(entry.key ?? ""), decodeJson<A>(entry.value ?? "")] as const),
+      );
+    }),
 });
 
 export const makeWriteDictClient = (
   dictId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: DictOps,
 ): WriteDictClient => ({
   dictId,
   put: (key, value, options = {}) =>
-    client(
-      Effect.gen(function* () {
-        const encodedKey = yield* encodeJson(key);
-        const id = yield* dictId;
-        const response = yield* dict.updateDict({
-          dictId: id,
-          updates: [{ key: encodedKey, value: yield* encodeJson(value) }],
-          ifNotExists: options.ifNotExists,
-        });
-        return options.ifNotExists ? (response.created ?? false) : true;
-      }),
-    ),
+    Effect.gen(function* () {
+      const encodedKey = yield* encodeJson(key);
+      const id = yield* dictId;
+      const response = yield* ops.updateDict({
+        dictId: id,
+        updates: [{ key: encodedKey, value: yield* encodeJson(value) }],
+        ifNotExists: options.ifNotExists,
+      });
+      return options.ifNotExists ? (response.created ?? false) : true;
+    }),
   update: (entries) =>
-    client(
-      Effect.gen(function* () {
-        const updates = yield* Effect.forEach([...entries], ([key, value]) =>
-          Effect.all({ key: encodeJson(key), value: encodeJson(value) }),
-        );
-        const id = yield* dictId;
-        yield* dict.updateDict({ dictId: id, updates });
-      }),
-    ),
+    Effect.gen(function* () {
+      const updates = yield* Effect.forEach([...entries], ([key, value]) =>
+        Effect.all({ key: encodeJson(key), value: encodeJson(value) }),
+      );
+      const id = yield* dictId;
+      yield* ops.updateDict({ dictId: id, updates });
+    }),
   pop: <A>(key: unknown) =>
-    client(
-      Effect.gen(function* () {
-        const encodedKey = yield* encodeJson(key);
-        const id = yield* dictId;
-        const response = yield* dict.dictPop({
-          dictId: id,
-          key: encodedKey,
-        });
-        return response.found && response.value !== undefined
-          ? yield* decodeJson<A>(response.value)
-          : undefined;
-      }),
-    ),
+    Effect.gen(function* () {
+      const encodedKey = yield* encodeJson(key);
+      const id = yield* dictId;
+      const response = yield* ops.dictPop({
+        dictId: id,
+        key: encodedKey,
+      });
+      return response.found && response.value !== undefined
+        ? yield* decodeJson<A>(response.value)
+        : undefined;
+    }),
   clear: () =>
-    client(
-      Effect.gen(function* () {
-        const id = yield* dictId;
-        yield* dict.clearDict({ dictId: id });
-      }),
-    ),
+    Effect.gen(function* () {
+      const id = yield* dictId;
+      yield* ops.clearDict({ dictId: id });
+    }),
 });
 
 export const makeReadWriteDictClient = (
   dictId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: DictOps,
 ): ReadWriteDictClient => ({
-  ...makeReadDictClient(dictId, client),
-  ...makeWriteDictClient(dictId, client),
+  ...makeReadDictClient(dictId, ops),
+  ...makeWriteDictClient(dictId, ops),
 });

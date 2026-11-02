@@ -4,13 +4,22 @@ import * as Layer from "effect/Layer";
 import { makeOpenModalBinding } from "./BindingHttp.ts";
 import { CreateDict, type DictHandle, type DictsClient } from "./CreateDict.ts";
 import { ensureDict, lookupDict, type DictAttributes } from "./Dict.ts";
-import { makeReadWriteDictClient } from "./DictClient.ts";
+import { DictOps, makeReadWriteDictClient } from "./DictClient.ts";
 import type { Environment } from "./Environment.ts";
 import { environmentOf, listAll } from "./internal.ts";
-import type { ModalClient } from "./ModalBindings.ts";
 
-const handleOf = (attributes: DictAttributes, client: ModalClient): DictHandle => ({
-  ...makeReadWriteDictClient(Effect.succeed(attributes.dictId), client),
+/** The operations the client calls, resolved by `ModalBindings.withCredentials`. */
+const DictsOps = Effect.all({
+  getOrCreate: dict.dictGetOrCreate,
+  delete: dict.deleteDict,
+  list: dict.listDict,
+  client: DictOps,
+});
+
+type DictsOps = Effect.Success<typeof DictsOps>;
+
+const handleOf = (attributes: DictAttributes, ops: DictsOps): DictHandle => ({
+  ...makeReadWriteDictClient(Effect.succeed(attributes.dictId), ops.client),
   dictId: Effect.succeed(attributes.dictId),
   name: attributes.name,
   attributes,
@@ -19,46 +28,42 @@ const handleOf = (attributes: DictAttributes, client: ModalClient): DictHandle =
 /** A dicts client over an environment name resolved per call. */
 export const makeDictsClient = (
   environment: Effect.Effect<string | undefined>,
-  client: ModalClient,
+  ops: DictsOps,
 ): DictsClient => ({
   getOrCreate: (name) =>
-    client(Effect.flatMap(environment, (env) => ensureDict(name, env))).pipe(
-      Effect.map((attributes) => handleOf(attributes, client)),
+    Effect.flatMap(environment, (env) => ensureDict(ops.getOrCreate, name, env)).pipe(
+      Effect.map((attributes) => handleOf(attributes, ops)),
     ),
   get: (name) =>
-    client(Effect.flatMap(environment, (env) => lookupDict(name, env))).pipe(
-      Effect.map((attributes) => (attributes ? handleOf(attributes, client) : undefined)),
+    Effect.flatMap(environment, (env) => lookupDict(ops.getOrCreate, name, env)).pipe(
+      Effect.map((attributes) => (attributes ? handleOf(attributes, ops) : undefined)),
     ),
   delete: (name) =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        const found = yield* lookupDict(name, env);
-        if (!found) return;
-        yield* dict
-          .deleteDict({ dictId: found.dictId })
-          .pipe(Effect.catchTag("DictNotFound", () => Effect.void));
-      }),
-    ),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      const found = yield* lookupDict(ops.getOrCreate, name, env);
+      if (!found) return;
+      yield* ops
+        .delete({ dictId: found.dictId })
+        .pipe(Effect.catchTag("DictNotFound", () => Effect.void));
+    }),
   list: () =>
-    client(
-      Effect.gen(function* () {
-        const env = yield* environment;
-        const items = yield* listAll(
-          (pagination) =>
-            dict
-              .listDict({ environmentName: environmentOf(env), pagination })
-              .pipe(Effect.map((response) => response.dicts ?? [])),
-          (item) => item.createdAt,
-        );
-        return items.flatMap((item) => (item.name ? [item.name] : []));
-      }),
-    ),
+    Effect.gen(function* () {
+      const env = yield* environment;
+      const items = yield* listAll(
+        (pagination) =>
+          ops
+            .list({ environmentName: environmentOf(env), pagination })
+            .pipe(Effect.map((response) => response.dicts ?? [])),
+        (item) => item.createdAt,
+      );
+      return items.flatMap((item) => (item.name ? [item.name] : []));
+    }),
 });
 
 /**
- * {@link CreateDict} over Modal's API. Binds the deployer's Modal token
- * onto the host; Modal tokens act on the whole workspace.
+ * {@link CreateDict} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the environment.
  *
  * @layer
  * @product Dict
@@ -68,9 +73,12 @@ export const CreateDictHttp = Layer.effect(
   CreateDict,
   makeOpenModalBinding({
     tag: "Modal.CreateDict",
-    make: Effect.fn(function* (client, environment?: Environment) {
+    operations: DictsOps,
+    role: "contributor",
+    environmentOf: (environment?: Environment) => environment?.name,
+    make: Effect.fn(function* (ops, environment?: Environment) {
       const name = environment ? yield* environment.name : Effect.succeed(undefined);
-      return makeDictsClient(name, client);
+      return makeDictsClient(name, ops);
     }),
   }),
 );

@@ -59,6 +59,14 @@ export const gpuConfig = (gpu: string | undefined): image.GPUConfig | undefined 
   return { gpuType: type!.toUpperCase(), count: count ? Number(count) : 1 };
 };
 
+/** The operations a build needs, resolved by `ModalBindings.withCredentials` (or at deploy). */
+export const ImageBuildOps = Effect.all({
+  getOrCreate: image.imageGetOrCreate,
+  joinStreaming: image.imageJoinStreaming,
+});
+
+export type ImageBuildOps = Effect.Success<typeof ImageBuildOps>;
+
 const FINISHED = (status: string | undefined) =>
   status !== undefined && status !== "GENERIC_STATUS_UNSPECIFIED";
 
@@ -68,6 +76,7 @@ const FINISHED = (status: string | undefined) =>
  * without rebuilding. Fails with {@link ImageBuildFailed} on a failed build.
  */
 export const buildImage = Effect.fn(function* (
+  ops: ImageBuildOps,
   appId: string,
   spec: ImageBuildSpec,
   options: { readonly note?: (message: string) => Effect.Effect<void> } = {},
@@ -83,7 +92,7 @@ export const buildImage = Effect.fn(function* (
       data: Buffer.from(file.data).toString("base64"),
     })),
   );
-  const created = yield* image.imageGetOrCreate({
+  const created = yield* ops.getOrCreate({
     appId,
     image: {
       baseImages: from.baseImages,
@@ -115,7 +124,7 @@ export const buildImage = Effect.fn(function* (
   // Each join call streams build logs for up to ~55 s; a build may take many.
   for (let attempt = 0; !FINISHED(result?.status) && attempt < 60; attempt++) {
     if (attempt === 0 && options.note) yield* options.note(`Building image ${imageId}...`);
-    const { items } = yield* image.imageJoinStreaming({
+    const { items } = yield* ops.joinStreaming({
       imageId,
       timeout: 55,
       lastEntryId,

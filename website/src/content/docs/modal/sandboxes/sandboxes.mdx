@@ -11,7 +11,7 @@ description: Create, find, run commands in, and stop Modal sandboxes from any ru
 const sandboxes = yield* Modal.CreateSandbox(Warm);
 ```
 
-Provide `Modal.CreateSandboxHttp`. It writes your Modal token into the Worker; Modal tokens act on the whole workspace.
+Provide `Modal.CreateSandboxHttp`. It gives the Worker its own Modal service user, a `contributor` in the App's environment.
 
 ## Create one per request
 

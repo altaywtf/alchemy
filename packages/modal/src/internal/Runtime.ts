@@ -269,7 +269,12 @@ export const runtimeLifecycle = <P extends ContainerProps>(kind: RuntimeKind<P>)
           PORT: String(port),
         };
         for (const [key, value] of Object.entries(news.env ?? {})) env[key] = envText(value);
-        const stored = yield* putSecret(secretName, app.environment, env);
+        const stored = yield* putSecret(
+          yield* secret.secretGetOrCreate,
+          secretName,
+          app.environment,
+          env,
+        );
 
         // Ensure the image: Modal reuses a cached build for the same inputs.
         const imageId =

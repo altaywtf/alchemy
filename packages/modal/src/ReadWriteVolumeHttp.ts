@@ -4,10 +4,11 @@ import { makeModalBinding } from "./BindingHttp.ts";
 import { ReadWriteVolume } from "./ReadWriteVolume.ts";
 import type { Volume } from "./Volume.ts";
 import { makeReadWriteVolumeClient } from "./VolumeClient.ts";
+import { VolumeFileOps } from "./VolumeFiles.ts";
 
 /**
- * {@link ReadWriteVolume} over Modal's volume API. Binds the deployer's Modal token
- * onto the host; Modal tokens act on the whole workspace.
+ * {@link ReadWriteVolume} over Modal's volume API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the volume's environment.
  *
  * @layer
  * @product Volume
@@ -17,9 +18,11 @@ export const ReadWriteVolumeHttp = Layer.effect(
   ReadWriteVolume,
   makeModalBinding({
     tag: "Modal.ReadWriteVolume",
-    make: Effect.fn(function* (volume: Volume, client) {
+    operations: VolumeFileOps,
+    role: "contributor",
+    make: Effect.fn(function* (volume: Volume, ops) {
       const volumeId = yield* volume.volumeId;
-      return makeReadWriteVolumeClient(volumeId, client);
+      return makeReadWriteVolumeClient(volumeId, ops);
     }),
   }),
 );

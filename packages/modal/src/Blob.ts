@@ -13,13 +13,22 @@ export class BlobTransferFailed extends Data.TaggedError("Modal.BlobTransferFail
   readonly message: string;
 }> {}
 
+/** The blob operations, resolved by `ModalBindings.withCredentials`. */
+export const BlobOps = Effect.all({
+  create: blob.createBlob,
+  get: blob.getBlob,
+  http: HttpClient.HttpClient,
+});
+
+export type BlobOps = Effect.Success<typeof BlobOps>;
+
 /** Upload bytes to Modal's blob store and return the blob id. */
-export const uploadBlob = Effect.fn(function* (bytes: Uint8Array) {
+export const uploadBlob = Effect.fn(function* (ops: BlobOps, bytes: Uint8Array) {
   const digests = yield* Effect.sync(() => ({
     md5: createHash("md5").update(bytes).digest("base64"),
     sha256: createHash("sha256").update(bytes).digest("base64"),
   }));
-  const created = yield* blob.createBlob({
+  const created = yield* ops.create({
     contentMd5: digests.md5,
     contentSha256Base64: digests.sha256,
     contentLength: String(bytes.length),
@@ -30,8 +39,7 @@ export const uploadBlob = Effect.fn(function* (bytes: Uint8Array) {
     });
   }
   // A presigned upload URL Modal handed back: used as-is.
-  const client = yield* HttpClient.HttpClient;
-  const response = yield* client.execute(
+  const response = yield* ops.http.execute(
     HttpClientRequest.put(created.uploadUrl).pipe(
       HttpClientRequest.bodyUint8Array(bytes, "application/octet-stream"),
       HttpClientRequest.setHeader("content-md5", digests.md5),
@@ -46,14 +54,13 @@ export const uploadBlob = Effect.fn(function* (bytes: Uint8Array) {
 });
 
 /** Download a blob's bytes. */
-export const downloadBlob = Effect.fn(function* (blobId: string) {
-  const { downloadUrl } = yield* blob.getBlob({ blobId });
+export const downloadBlob = Effect.fn(function* (ops: BlobOps, blobId: string) {
+  const { downloadUrl } = yield* ops.get({ blobId });
   if (!downloadUrl) {
     return yield* new BlobTransferFailed({ message: `Modal returned no URL for blob ${blobId}` });
   }
   // A presigned download URL Modal handed back: used as-is.
-  const client = yield* HttpClient.HttpClient;
-  const response = yield* client.get(downloadUrl);
+  const response = yield* ops.http.get(downloadUrl);
   if (response.status >= 300) {
     return yield* new BlobTransferFailed({
       message: `Downloading blob ${blobId} failed with HTTP ${response.status}`,

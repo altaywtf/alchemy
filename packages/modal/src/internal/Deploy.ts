@@ -7,7 +7,7 @@ import { sha256, sha256Object } from "alchemy/Util/sha256";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
-import { buildImage, type ImageBuildSpec } from "../ImageBuild.ts";
+import { buildImage, ImageBuildOps, type ImageBuildSpec } from "../ImageBuild.ts";
 import { checkCommands, lowerPlan, MODAL_CAPABILITIES } from "../ImagePlan.ts";
 import { ENTRYPOINT_PATH, ENTRYPOINT_SOURCE } from "./Entrypoint.ts";
 
@@ -181,6 +181,7 @@ export const buildRuntimeImage = Effect.fn(function* (
   },
 ) {
   const builderVersion = yield* builderVersionOf(options.builderVersion);
+  const buildOps = yield* ImageBuildOps;
   let baseImageId: string | undefined;
   if (planned.python !== false) {
     const table =
@@ -197,6 +198,7 @@ export const buildRuntimeImage = Effect.fn(function* (
       `python-build-standalone.${release[0]}.${release[1]}-gnu`,
     );
     baseImageId = yield* buildImage(
+      buildOps,
       appId,
       {
         dockerTag: planned.plan.base,
@@ -212,6 +214,7 @@ export const buildRuntimeImage = Effect.fn(function* (
     );
   }
   return yield* buildImage(
+    buildOps,
     appId,
     {
       ...planned.spec,

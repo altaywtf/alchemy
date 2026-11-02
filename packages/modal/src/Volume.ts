@@ -133,14 +133,16 @@ const versionFromWire = (version: string | undefined): 1 | 2 =>
   version === "VOLUME_FS_VERSION_V1" ? 1 : 2;
 
 /** A volume by name, or `undefined` when missing. */
-export const lookupVolume = Effect.fn(function* (name: string, env: string | undefined) {
-  const found = yield* volume
-    .volumeGetOrCreate({
-      deploymentName: name,
-      environmentName: environmentOf(env),
-      objectCreationType: "OBJECT_CREATION_TYPE_UNSPECIFIED",
-    })
-    .pipe(Effect.catchTag("VolumeNotFound", () => Effect.undefined));
+export const lookupVolume = Effect.fn(function* (
+  getOrCreate: Effect.Success<typeof volume.volumeGetOrCreate>,
+  name: string,
+  env: string | undefined,
+) {
+  const found = yield* getOrCreate({
+    deploymentName: name,
+    environmentName: environmentOf(env),
+    objectCreationType: "OBJECT_CREATION_TYPE_UNSPECIFIED",
+  }).pipe(Effect.catchTag("VolumeNotFound", () => Effect.undefined));
   if (!found?.volumeId) return undefined;
   return {
     volumeId: found.volumeId,
@@ -156,11 +158,12 @@ export const lookupVolume = Effect.fn(function* (name: string, env: string | und
  * client.
  */
 export const ensureVolume = Effect.fn(function* (
+  getOrCreate: Effect.Success<typeof volume.volumeGetOrCreate>,
   name: string,
   env: string | undefined,
   version?: 1 | 2,
 ) {
-  const created = yield* volume.volumeGetOrCreate({
+  const created = yield* getOrCreate({
     deploymentName: name,
     environmentName: environmentOf(env),
     objectCreationType: "OBJECT_CREATION_TYPE_CREATE_IF_MISSING",
@@ -201,7 +204,7 @@ export const VolumeProvider = () =>
             } satisfies VolumeAttributes;
           }
         }
-        return yield* lookupVolume(name, env);
+        return yield* lookupVolume(yield* volume.volumeGetOrCreate, name, env);
       });
 
       return {
@@ -230,7 +233,12 @@ export const VolumeProvider = () =>
           // Ensure
           if (!current) {
             yield* session.note(`Creating volume ${name}...`);
-            current = yield* ensureVolume(name, envNameOf(news.environment), news.version);
+            current = yield* ensureVolume(
+              yield* volume.volumeGetOrCreate,
+              name,
+              envNameOf(news.environment),
+              news.version,
+            );
           }
           // Sync the name: a renamed volume keeps its id and files.
           if (current.name !== name) {

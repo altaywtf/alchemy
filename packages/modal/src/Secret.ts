@@ -124,14 +124,16 @@ const plainEnv = (env: Record<string, string | Redacted.Redacted<string>>) =>
   );
 
 /** A secret by name, or `undefined` when missing. */
-export const lookupSecret = Effect.fn(function* (name: string, env: string | undefined) {
-  const found = yield* secret
-    .secretGetOrCreate({
-      deploymentName: name,
-      environmentName: environmentOf(env),
-      objectCreationType: "OBJECT_CREATION_TYPE_UNSPECIFIED",
-    })
-    .pipe(Effect.catchTag("SecretNotFound", () => Effect.undefined));
+export const lookupSecret = Effect.fn(function* (
+  getOrCreate: Effect.Success<typeof secret.secretGetOrCreate>,
+  name: string,
+  env: string | undefined,
+) {
+  const found = yield* getOrCreate({
+    deploymentName: name,
+    environmentName: environmentOf(env),
+    objectCreationType: "OBJECT_CREATION_TYPE_UNSPECIFIED",
+  }).pipe(Effect.catchTag("SecretNotFound", () => Effect.undefined));
   if (!found?.secretId) return undefined;
   return {
     secretId: found.secretId,
@@ -147,11 +149,12 @@ export const lookupSecret = Effect.fn(function* (name: string, env: string | und
  * {@link WriteSecret} clients.
  */
 export const putSecret = Effect.fn(function* (
+  getOrCreate: Effect.Success<typeof secret.secretGetOrCreate>,
   name: string,
   env: string | undefined,
   values: Record<string, string | Redacted.Redacted<string>>,
 ) {
-  const written = yield* secret.secretGetOrCreate({
+  const written = yield* getOrCreate({
     deploymentName: name,
     environmentName: environmentOf(env),
     objectCreationType: "OBJECT_CREATION_TYPE_CREATE_OVERWRITE_IF_EXISTS",
@@ -187,6 +190,7 @@ export const SecretProvider = () =>
         read: Effect.fn(function* ({ id, olds, output }) {
           const name = output?.name ?? (yield* objectName(id, olds?.name));
           const observed = yield* lookupSecret(
+            yield* secret.secretGetOrCreate,
             name,
             output?.environment ?? envNameOf(olds?.environment),
           );
@@ -198,7 +202,12 @@ export const SecretProvider = () =>
           // Values can't be observed, so overwriting is the sync: Modal
           // replaces the variable set atomically and keeps the secret id.
           yield* session.note(`Writing secret ${name}...`);
-          return yield* putSecret(name, envNameOf(news.environment), news.env);
+          return yield* putSecret(
+            yield* secret.secretGetOrCreate,
+            name,
+            envNameOf(news.environment),
+            news.env,
+          );
         }),
         delete: Effect.fn(function* ({ output }) {
           yield* secret

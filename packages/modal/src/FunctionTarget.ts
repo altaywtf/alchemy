@@ -3,6 +3,7 @@ import {
   type ClassParameterValue,
 } from "@distilled.cloud/modal/ClassParameters";
 import * as functions from "@distilled.cloud/modal/functions";
+import type { Input } from "alchemy/Input";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { environmentOf } from "./internal.ts";
@@ -88,7 +89,16 @@ const serializeParameters = Effect.fn(function* (
  * carries its id; a name is looked up on first use and cached (the id only
  * changes when the App is redeployed).
  */
+/** The operations that look a function up by name, resolved by `ModalBindings.withCredentials`. */
+export const FunctionLookupOps = Effect.all({
+  get: functions.getFunction,
+  bindParams: functions.functionBindParams,
+});
+
+export type FunctionLookupOps = Effect.Success<typeof FunctionLookupOps>;
+
 export const resolveFunction = Effect.fn(function* (
+  lookup: FunctionLookupOps,
   target: FunctionTarget | { readonly functionId: unknown },
 ) {
   if (!isFunctionRef(target)) {
@@ -106,7 +116,7 @@ export const resolveFunction = Effect.fn(function* (
       ? Effect.succeed(cached)
       : Effect.gen(function* () {
           const environmentName = environmentOf(target.environment);
-          const found = yield* functions.getFunction({
+          const found = yield* lookup.get({
             appName: target.app,
             objectTag: tag,
             environmentName,
@@ -116,7 +126,7 @@ export const resolveFunction = Effect.fn(function* (
           if (target.parameters !== undefined) {
             const schema = found.handleMetadata?.classParameterInfo?.schema ?? [];
             const serializedParams = yield* serializeParameters(schema, target.parameters);
-            const bound = yield* functions.functionBindParams({
+            const bound = yield* lookup.bindParams({
               functionId: id,
               serializedParams,
               environmentName,
@@ -131,26 +141,35 @@ export const resolveFunction = Effect.fn(function* (
 });
 
 /**
- * A binding layer over a function target: binds the Modal token pair onto
- * the host (deploy only), resolves the target, and builds the client.
+ * A binding layer over a function target: grants the host's identity `role`
+ * on the function's environment (deploy only), resolves the target, and
+ * builds the client over `operations`.
  */
-export const makeFunctionBinding = <Target, Client>(options: {
+export const makeFunctionBinding = <Target, Ops, Client>(options: {
   readonly tag: string;
-  readonly make: (
-    resolved: ResolvedFunction,
-    client: ModalBindings.ModalClient,
-    target: Target,
-  ) => Effect.Effect<Client>;
+  readonly operations: Effect.Effect<Ops, never, any>;
+  readonly role: ModalBindings.EnvironmentGrant["role"];
+  readonly make: (resolved: ResolvedFunction, ops: Ops, target: Target) => Effect.Effect<Client>;
 }) =>
   Effect.gen(function* () {
-    const client = yield* ModalBindings.Client;
+    const lookup = yield* ModalBindings.withCredentials(FunctionLookupOps);
+    const ops = yield* ModalBindings.withCredentials(options.operations);
     const bind = yield* ModalBindings.Bind;
     return Effect.fn(options.tag)(function* (target: Target) {
       if (!globalThis.__ALCHEMY_RUNTIME__) {
-        if (isFunctionRef(target)) yield* bind`${options.tag}`();
-        else yield* bind`${options.tag}(${target})`();
+        if (isFunctionRef(target)) {
+          yield* bind`${options.tag}`({
+            roles: [{ environment: target.environment, role: options.role }],
+          });
+        } else {
+          const environment = (target as { readonly environment: Input<string | undefined> })
+            .environment;
+          yield* bind`${options.tag}(${target})`({
+            roles: [{ environment, role: options.role }],
+          });
+        }
       }
-      const resolved = yield* resolveFunction(target as FunctionTarget);
-      return yield* options.make(resolved, client, target);
+      const resolved = yield* resolveFunction(lookup, target as FunctionTarget);
+      return yield* options.make(resolved, ops, target);
     });
   });

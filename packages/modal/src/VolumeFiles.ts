@@ -24,6 +24,18 @@ export interface VolumeFileEntry {
 
 const BLOCK_SIZE = 8 * 1024 * 1024;
 
+/** The operations a volume's files need, resolved by `ModalBindings.withCredentials`. */
+export const VolumeFileOps = Effect.all({
+  getFile: volume.volumeGetFile2,
+  listFiles: volume.volumeListFiles2,
+  putFiles: volume.volumePutFiles2,
+  removeFile: volume.volumeRemoveFile2,
+  copyFiles: volume.volumeCopyFiles2,
+  http: HttpClient.HttpClient,
+});
+
+export type VolumeFileOps = Effect.Success<typeof VolumeFileOps>;
+
 const typeOf = (type: string | undefined): VolumeFileEntry["type"] =>
   type === "FILE"
     ? "file"
@@ -40,15 +52,18 @@ const toBytes = (data: string | Uint8Array) =>
  * Read a file from a (v2) volume: Modal returns presigned URLs for the
  * file's blocks, which are fetched and concatenated.
  */
-export const readVolumeFile = Effect.fn(function* (volumeId: string, path: string) {
-  const http = yield* HttpClient.HttpClient;
-  const { getUrls, size } = yield* volume.volumeGetFile2({ volumeId, path });
+export const readVolumeFile = Effect.fn(function* (
+  ops: VolumeFileOps,
+  volumeId: string,
+  path: string,
+) {
+  const { getUrls, size } = yield* ops.getFile({ volumeId, path });
   const total = Number(size ?? 0);
   const out = new Uint8Array(total);
   let offset = 0;
   for (const url of getUrls ?? []) {
     // A presigned block URL returned by VolumeGetFile2 (allowed raw HTTP).
-    const response = yield* http.execute(HttpClientRequest.get(url));
+    const response = yield* ops.http.execute(HttpClientRequest.get(url));
     if (response.status >= 300) {
       return yield* new VolumeTransferError({
         path,
@@ -65,11 +80,12 @@ export const readVolumeFile = Effect.fn(function* (volumeId: string, path: strin
 
 /** List a directory of a (v2) volume. */
 export const listVolumeFiles = Effect.fn(function* (
+  ops: VolumeFileOps,
   volumeId: string,
   path: string,
   options: { readonly recursive?: boolean } = {},
 ) {
-  const { items } = yield* volume.volumeListFiles2({
+  const { items } = yield* ops.listFiles({
     volumeId,
     path,
     recursive: options.recursive ?? false,
@@ -90,12 +106,12 @@ export const listVolumeFiles = Effect.fn(function* (
  * the upload responses.
  */
 export const writeVolumeFile = Effect.fn(function* (
+  ops: VolumeFileOps,
   volumeId: string,
   path: string,
   data: string | Uint8Array,
   options: { readonly mode?: number } = {},
 ) {
-  const http = yield* HttpClient.HttpClient;
   const bytes = yield* toBytes(data);
   const blocks = yield* Effect.sync(() => {
     const out: { readonly data: Uint8Array; readonly sha256: string }[] = [];
@@ -108,7 +124,7 @@ export const writeVolumeFile = Effect.fn(function* (
   });
   const putResponses = new Map<number, string>();
   for (let round = 0; round < 3; round++) {
-    const { missingBlocks } = yield* volume.volumePutFiles2({
+    const { missingBlocks } = yield* ops.putFiles({
       volumeId,
       files: [
         {
@@ -128,7 +144,7 @@ export const writeVolumeFile = Effect.fn(function* (
       const block = blocks[index];
       if (!block || !missing.putUrl) continue;
       // A presigned block URL returned by VolumePutFiles2 (allowed raw HTTP).
-      const response = yield* http.execute(
+      const response = yield* ops.http.execute(
         HttpClientRequest.put(missing.putUrl).pipe(
           HttpClientRequest.bodyUint8Array(block.data, "application/octet-stream"),
         ),
@@ -152,21 +168,23 @@ export const writeVolumeFile = Effect.fn(function* (
 
 /** Remove a file (or, with `recursive`, a directory) from a (v2) volume. */
 export const removeVolumeFile = Effect.fn(function* (
+  ops: VolumeFileOps,
   volumeId: string,
   path: string,
   options: { readonly recursive?: boolean } = {},
 ) {
-  yield* volume.volumeRemoveFile2({ volumeId, path, recursive: options.recursive ?? false });
+  yield* ops.removeFile({ volumeId, path, recursive: options.recursive ?? false });
 });
 
 /** Copy files inside a (v2) volume. */
 export const copyVolumeFiles = Effect.fn(function* (
+  ops: VolumeFileOps,
   volumeId: string,
   sources: ReadonlyArray<string>,
   destination: string,
   options: { readonly recursive?: boolean } = {},
 ) {
-  yield* volume.volumeCopyFiles2({
+  yield* ops.copyFiles({
     volumeId,
     srcPaths: [...sources],
     dstPath: destination,

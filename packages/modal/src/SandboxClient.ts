@@ -1,7 +1,5 @@
 import * as container from "@distilled.cloud/modal/container";
-import { withTaskCommandRouter } from "@distilled.cloud/modal/Credentials";
 import * as persistent from "@distilled.cloud/modal/persistent";
-import type { ModalOpContext } from "@distilled.cloud/modal/Protocol";
 import * as sandbox from "@distilled.cloud/modal/sandbox";
 import * as router from "@distilled.cloud/modal/task_command_router";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
@@ -11,8 +9,9 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as Schedule from "effect/Schedule";
-import { buildImage, gpuConfig, type ImageBuildSpec } from "./ImageBuild.ts";
+import { buildImage, gpuConfig, ImageBuildOps, type ImageBuildSpec } from "./ImageBuild.ts";
 import { environmentOf, seconds } from "./internal.ts";
+import { withRouter } from "./ModalBindings.ts";
 
 /** A sandbox ended (or never became ready) before the call could finish. */
 export class SandboxNotRunning extends Data.TaggedError("Modal.SandboxNotRunning")<{
@@ -311,7 +310,7 @@ export interface SandboxHandleOf<R> {
 export type SandboxHandle = SandboxHandleOf<RuntimeContext>;
 
 /** A sandbox handle whose calls need Modal credentials and an HTTP client. */
-export type RawSandboxHandle = SandboxHandleOf<ModalOpContext>;
+export type RawSandboxHandle = SandboxHandleOf<never>;
 
 /** Where a sandbox client creates sandboxes. */
 export interface SandboxTarget {
@@ -503,21 +502,69 @@ const outboundPolicyOf = (policy: OutboundPolicy): sandbox.OutboundPolicy => ({
 });
 
 /**
+ * The operations sandbox clients call, resolved once by
+ * `ModalBindings.withCredentials` (or at deploy, with the deployer's).
+ */
+export const SandboxOps = Effect.all({
+  create: sandbox.sandboxCreateV2,
+  getFromName: sandbox.sandboxGetFromNameV2,
+  list: sandbox.sandboxListV2,
+  restore: sandbox.sandboxRestoreV2,
+  getTaskId: sandbox.sandboxGetTaskIdV2,
+  getCommandRouterAccess: sandbox.sandboxGetCommandRouterAccess,
+  getTunnels: sandbox.sandboxGetTunnelsV2,
+  createConnectToken: sandbox.sandboxCreateConnectTokenV2,
+  snapshotFs: sandbox.sandboxSnapshotFs,
+  snapshot: sandbox.sandboxSnapshot,
+  waitSnapshot: sandbox.waitSandboxSnapshot,
+  setOutboundPolicy: sandbox.sandboxSetOutboundPolicyV2,
+  setTags: sandbox.sandboxTagsSetV2,
+  getTags: sandbox.sandboxTagsGetV2,
+  setName: sandbox.sandboxSetName,
+  getResourceUsage: sandbox.sandboxGetResourceUsage,
+  getLogs: sandbox.sandboxGetLogs,
+  wait: sandbox.sandboxWaitV2,
+  terminate: sandbox.sandboxTerminateV2,
+  usage: sandbox.sandboxGetTimeRangeStats,
+  exec: container.execContainer,
+  execPutInput: container.containerExecPutInput,
+  execGetOutput: container.containerExecGetOutput,
+  execWait: container.containerExecWait,
+  createPersistent: persistent.createPersistentSandbox,
+  getPersistent: persistent.getPersistentSandbox,
+  resumePersistent: persistent.resumePersistentSandbox,
+  terminatePersistent: persistent.terminatePersistentSandbox,
+  images: ImageBuildOps,
+  http: HttpClient.HttpClient,
+});
+
+export type SandboxOps = Effect.Success<typeof SandboxOps>;
+
+/** Task command router operations, resolved per sandbox with its router access. */
+const routerOps = {
+  snapshotDirectory: withRouter(router.taskSnapshotDirectory),
+  mountDirectory: withRouter(router.taskMountDirectory),
+  setNetworkAccess: withRouter(router.taskSetNetworkAccess),
+};
+
+/**
  * The image to boot: a `Modal.Image`'s id, or a registry ref built (and
  * cached by Modal) into an image in the target app.
  */
 export const resolveSandboxImage = Effect.fn(function* (
+  ops: SandboxOps,
   target: SandboxTarget,
   image: SandboxImage | undefined,
 ) {
   if (image !== undefined && typeof image !== "string") return image.imageId;
   if (image === undefined && target.imageId !== undefined) return target.imageId;
   const spec: ImageBuildSpec = { dockerTag: image ?? "debian:bookworm-slim", commands: [] };
-  return yield* buildImage(target.appId, spec);
+  return yield* buildImage(ops.images, target.appId, spec);
 });
 
 /** The handle for an existing sandbox id. */
 export const sandboxHandle = (
+  ops: SandboxOps,
   sandboxId: string,
   target: Pick<SandboxTarget, "environment" | "program">,
 ): RawSandboxHandle => {
@@ -525,7 +572,7 @@ export const sandboxHandle = (
   const taskId = Effect.gen(function* () {
     if (cachedTaskId !== undefined) return cachedTaskId;
     for (let attempt = 0; attempt < 10; attempt++) {
-      const response = yield* sandbox.sandboxGetTaskIdV2({
+      const response = yield* ops.getTaskId({
         sandboxId,
         timeout: 55,
         waitUntilReady: true,
@@ -550,16 +597,20 @@ export const sandboxHandle = (
     });
   });
 
-  const viaRouter = <A, E, R>(f: (taskId: string) => Effect.Effect<A, E, R>) =>
+  const viaRouter = <Op, A, E>(
+    resolve: (access: { readonly url: string; readonly jwt: string }) => Effect.Effect<Op>,
+    f: (op: Op, taskId: string) => Effect.Effect<A, E>,
+  ) =>
     Effect.gen(function* () {
       const id = yield* taskId;
-      const access = yield* sandbox.sandboxGetCommandRouterAccess({ sandboxId, taskId: id });
+      const access = yield* ops.getCommandRouterAccess({ sandboxId, taskId: id });
       if (!access.url || !access.jwt) {
         return yield* new SandboxUnexpectedResponse({
           message: `Modal returned no command router for sandbox ${sandboxId}`,
         });
       }
-      return yield* f(id).pipe(withTaskCommandRouter({ url: access.url, jwt: access.jwt }));
+      const op = yield* resolve({ url: access.url, jwt: access.jwt });
+      return yield* f(op, id);
     });
 
   /**
@@ -585,7 +636,7 @@ export const sandboxHandle = (
     exec: Effect.fn(function* (command, options = {}) {
       const id = yield* taskId;
       const env = Object.entries(options.env ?? {}).map(([key, value]) => `${key}=${value}`);
-      const { execId } = yield* container.execContainer({
+      const { execId } = yield* ops.exec({
         taskId: id,
         command: env.length > 0 ? ["env", ...env, ...command] : [...command],
         workdir: options.workdir,
@@ -598,14 +649,14 @@ export const sandboxHandle = (
         return yield* new SandboxUnexpectedResponse({ message: "Modal returned no exec id" });
       if (options.stdin !== undefined) {
         const message = yield* encodeBase64(options.stdin);
-        yield* container.containerExecPutInput({ execId, input: { message, messageIndex: "1" } });
-        yield* container.containerExecPutInput({ execId, input: { messageIndex: "2", eof: true } });
+        yield* ops.execPutInput({ execId, input: { message, messageIndex: "1" } });
+        yield* ops.execPutInput({ execId, input: { messageIndex: "2", eof: true } });
       }
       const batches: container.RuntimeOutputBatch[] = [];
       let lastBatchIndex: string | undefined;
       let exitCode: number | undefined;
       for (let attempt = 0; exitCode === undefined && attempt < 1_440; attempt++) {
-        const { items } = yield* container.containerExecGetOutput({
+        const { items } = yield* ops.execGetOutput({
           execId,
           timeout: 55,
           lastBatchIndex,
@@ -617,7 +668,7 @@ export const sandboxHandle = (
           if (batch.exitCode !== undefined) exitCode = batch.exitCode;
         }
         if (exitCode === undefined && items.length === 0) {
-          const waited = yield* container.containerExecWait({ execId, timeout: 0 });
+          const waited = yield* ops.execWait({ execId, timeout: 0 });
           if (waited.completed) exitCode = waited.exitCode ?? 0;
         }
       }
@@ -658,7 +709,7 @@ export const sandboxHandle = (
       yield* fsExec(path, options.recursive ? 'rm -r "$1"' : 'rm "$1"');
     }),
     tunnels: Effect.fn(function* (timeout) {
-      const { tunnels } = yield* sandbox.sandboxGetTunnelsV2({
+      const { tunnels } = yield* ops.getTunnels({
         sandboxId,
         timeout: seconds(timeout) ?? 50,
       });
@@ -679,7 +730,7 @@ export const sandboxHandle = (
       return out;
     }),
     connectToken: Effect.fn(function* (options = {}) {
-      const response = yield* sandbox.sandboxCreateConnectTokenV2({
+      const response = yield* ops.createConnectToken({
         sandboxId,
         port: options.port,
         userMetadata: options.userMetadata,
@@ -690,7 +741,7 @@ export const sandboxHandle = (
       return { url: response.url, token: response.token };
     }),
     snapshotFilesystem: Effect.fn(function* (timeout) {
-      const response = yield* sandbox.sandboxSnapshotFs({
+      const response = yield* ops.snapshotFs({
         sandboxId,
         timeout: seconds(timeout) ?? 55,
       });
@@ -702,10 +753,10 @@ export const sandboxHandle = (
       return { imageId: response.imageId };
     }),
     snapshotMemory: Effect.fn(function* () {
-      const { snapshotId } = yield* sandbox.sandboxSnapshot({ sandboxId });
+      const { snapshotId } = yield* ops.snapshot({ sandboxId });
       if (!snapshotId) return yield* new SandboxUnexpectedResponse({ message: "No snapshot id" });
       for (let attempt = 0; attempt < 10; attempt++) {
-        const { result } = yield* sandbox.waitSandboxSnapshot({ snapshotId, timeout: 55 });
+        const { result } = yield* ops.waitSnapshot({ snapshotId, timeout: 55 });
         if (result?.status === "GENERIC_STATUS_SUCCESS") return { snapshotId };
         if (result?.status && result.status !== "GENERIC_STATUS_UNSPECIFIED") {
           return yield* new SandboxUnexpectedResponse({
@@ -718,7 +769,7 @@ export const sandboxHandle = (
       });
     }),
     snapshotDirectory: (path) =>
-      viaRouter((task) => router.taskSnapshotDirectory({ taskId: task, path })).pipe(
+      viaRouter(routerOps.snapshotDirectory, (op, task) => op({ taskId: task, path })).pipe(
         Effect.flatMap((response) =>
           response.imageId
             ? Effect.succeed({ imageId: response.imageId })
@@ -726,38 +777,38 @@ export const sandboxHandle = (
         ),
       ),
     mountDirectory: (path, snapshot) =>
-      viaRouter((task) =>
-        router.taskMountDirectory({ taskId: task, path, imageId: snapshot.imageId }),
+      viaRouter(routerOps.mountDirectory, (op, task) =>
+        op({ taskId: task, path, imageId: snapshot.imageId }),
       ).pipe(Effect.asVoid),
     setNetworkAccess: (access) =>
-      viaRouter((task) =>
-        router.taskSetNetworkAccess({
+      viaRouter(routerOps.setNetworkAccess, (op, task) =>
+        op({
           taskId: task,
           networkAccess: networkAccessOf(access) ?? { networkAccessType: "OPEN" },
         }),
       ).pipe(Effect.asVoid),
     setOutboundPolicy: Effect.fn(function* (policy) {
-      yield* sandbox.sandboxSetOutboundPolicyV2({
+      yield* ops.setOutboundPolicy({
         sandboxId,
         outboundPolicy: outboundPolicyOf(policy),
       });
     }),
     setTags: Effect.fn(function* (tags) {
-      yield* sandbox.sandboxTagsSetV2({
+      yield* ops.setTags({
         sandboxId,
         environmentName: environmentOf(target.environment),
         tags: Object.entries(tags).map(([tagName, tagValue]) => ({ tagName, tagValue })),
       });
     }),
     getTags: Effect.fn(function* () {
-      const { tags } = yield* sandbox.sandboxTagsGetV2({ sandboxId });
+      const { tags } = yield* ops.getTags({ sandboxId });
       return Object.fromEntries((tags ?? []).map((t) => [t.tagName ?? "", t.tagValue ?? ""]));
     }),
     setName: Effect.fn(function* (name) {
-      yield* sandbox.sandboxSetName({ sandboxId, name });
+      yield* ops.setName({ sandboxId, name });
     }),
     resourceUsage: Effect.fn(function* () {
-      const usage = yield* sandbox.sandboxGetResourceUsage({ sandboxId });
+      const usage = yield* ops.getResourceUsage({ sandboxId });
       return {
         cpuSeconds: Number(usage.cpuCoreNanosecs ?? 0) / 1e9,
         memoryGibSeconds: Number(usage.memGibNanosecs ?? 0) / 1e9,
@@ -765,7 +816,7 @@ export const sandboxHandle = (
       };
     }),
     logs: Effect.fn(function* (options = {}) {
-      const { items } = yield* sandbox.sandboxGetLogs({
+      const { items } = yield* ops.getLogs({
         sandboxId,
         fileDescriptor: "FILE_DESCRIPTOR_STDOUT",
         timeout: seconds(options.timeout) ?? 5,
@@ -776,7 +827,7 @@ export const sandboxHandle = (
         .join("");
     }),
     wait: Effect.fn(function* (timeout) {
-      const { result } = yield* sandbox.sandboxWaitV2({
+      const { result } = yield* ops.wait({
         sandboxId,
         timeout: seconds(timeout) ?? 0,
       });
@@ -801,14 +852,13 @@ export const sandboxHandle = (
       }
       const url = new URL(request.url, "http://sandbox");
       // The user's own program, reached through its tunnel (allowed raw HTTP).
-      const http = yield* HttpClient.HttpClient;
-      return yield* http.execute(
+      return yield* ops.http.execute(
         HttpClientRequest.setUrl(request, `${tunnel.url}${url.pathname}${url.search}`),
       );
     }),
     terminate: Effect.fn(function* () {
-      yield* sandbox
-        .sandboxTerminateV2({ sandboxId })
+      yield* ops
+        .terminate({ sandboxId })
         .pipe(Effect.catchTag("SandboxNotFound", () => Effect.void));
     }),
   };
@@ -820,10 +870,11 @@ export const sandboxHandle = (
  * implementation behind `CreateSandbox` and warm-base image builds.
  */
 export const createSandbox = Effect.fn(function* (
+  ops: SandboxOps,
   target: SandboxTarget,
   options: SandboxCreateOptions = {},
 ) {
-  const imageId = yield* resolveSandboxImage(target, options.image);
+  const imageId = yield* resolveSandboxImage(ops, target, options.image);
   const program = target.program;
   const withProgram: SandboxCreateOptions = program
     ? {
@@ -833,7 +884,7 @@ export const createSandbox = Effect.fn(function* (
         encryptedPorts: [...new Set([program.port, ...(options.encryptedPorts ?? [])])],
       }
     : options;
-  const created = yield* sandbox.sandboxCreateV2({
+  const created = yield* ops.create({
     appId: target.appId,
     definition: definitionOf(imageId, withProgram),
     tags: Object.entries(options.tags ?? {}).map(([tagName, tagValue]) => ({ tagName, tagValue })),
@@ -841,27 +892,32 @@ export const createSandbox = Effect.fn(function* (
   if (!created.sandboxId) {
     return yield* new SandboxUnexpectedResponse({ message: "Modal returned no sandbox id" });
   }
-  return sandboxHandle(created.sandboxId, target);
+  return sandboxHandle(ops, created.sandboxId, target);
 });
 
 /** A running sandbox of `target`'s app by name, or `undefined`. */
-export const sandboxFromName = Effect.fn(function* (target: SandboxTarget, name: string) {
-  const found = yield* sandbox
-    .sandboxGetFromNameV2({
+export const sandboxFromName = Effect.fn(function* (
+  ops: SandboxOps,
+  target: SandboxTarget,
+  name: string,
+) {
+  const found = yield* ops
+    .getFromName({
       sandboxName: name,
       appName: target.appName,
       environmentName: environmentOf(target.environment),
     })
     .pipe(Effect.catchTag("SandboxNotFound", () => Effect.undefined));
-  return found?.sandboxId ? sandboxHandle(found.sandboxId, target) : undefined;
+  return found?.sandboxId ? sandboxHandle(ops, found.sandboxId, target) : undefined;
 });
 
 /** Running sandboxes of `target`'s app, optionally filtered by tags. */
 export const listSandboxes = Effect.fn(function* (
+  ops: SandboxOps,
   target: SandboxTarget,
   options: { readonly tags?: Record<string, string>; readonly includeFinished?: boolean } = {},
 ) {
-  const { sandboxes } = yield* sandbox.sandboxListV2({
+  const { sandboxes } = yield* ops.list({
     appId: target.appId,
     environmentName: environmentOf(target.environment),
     includeFinished: options.includeFinished ?? false,
@@ -885,11 +941,12 @@ export const listSandboxes = Effect.fn(function* (
 
 /** Restore a memory snapshot into a new sandbox. */
 export const restoreSandbox = Effect.fn(function* (
+  ops: SandboxOps,
   target: SandboxTarget,
   snapshot: { readonly snapshotId: string },
   options: { readonly name?: string } = {},
 ) {
-  const restored = yield* sandbox.sandboxRestoreV2({
+  const restored = yield* ops.restore({
     snapshotId: snapshot.snapshotId,
     sandboxNameOverride: options.name,
     sandboxNameOverrideType: options.name ? "SANDBOX_NAME_OVERRIDE_TYPE_STRING" : undefined,
@@ -897,7 +954,7 @@ export const restoreSandbox = Effect.fn(function* (
   if (!restored.sandboxId) {
     return yield* new SandboxUnexpectedResponse({ message: "Modal returned no restored sandbox" });
   }
-  return sandboxHandle(restored.sandboxId, target);
+  return sandboxHandle(ops, restored.sandboxId, target);
 });
 
 /**
@@ -925,21 +982,22 @@ export interface PersistentSandboxHandleOf<R> {
   terminate(): Effect.Effect<void, any, R>;
 }
 
-export type RawPersistentSandboxHandle = PersistentSandboxHandleOf<ModalOpContext>;
+export type RawPersistentSandboxHandle = PersistentSandboxHandleOf<never>;
 export type PersistentSandboxHandle = PersistentSandboxHandleOf<RuntimeContext>;
 
 /** The handle for an existing persistent sandbox id. */
 export const persistentSandboxHandle = (
+  ops: SandboxOps,
   persistentSandboxId: string,
   target: Pick<SandboxTarget, "environment" | "program">,
 ): RawPersistentSandboxHandle => ({
   persistentSandboxId,
   session: Effect.fn(function* () {
-    const running = yield* persistent.getPersistentSandbox({ persistentSandboxId });
-    if (running.sandboxId) return sandboxHandle(running.sandboxId, target);
+    const running = yield* ops.getPersistent({ persistentSandboxId });
+    if (running.sandboxId) return sandboxHandle(ops, running.sandboxId, target);
     // A paused box resumes from its last session's filesystem. Modal answers
     // busy while the previous session is still saving it.
-    const resumed = yield* persistent.resumePersistentSandbox({ persistentSandboxId }).pipe(
+    const resumed = yield* ops.resumePersistent({ persistentSandboxId }).pipe(
       Effect.retry({
         while: (error) => error._tag === "PersistentSandboxBusy",
         schedule: Schedule.spaced("1 second"),
@@ -951,22 +1009,23 @@ export const persistentSandboxHandle = (
         message: `Modal returned no session for persistent sandbox ${persistentSandboxId}`,
       });
     }
-    return sandboxHandle(resumed.sandboxId, target);
+    return sandboxHandle(ops, resumed.sandboxId, target);
   }),
   terminate: Effect.fn(function* () {
-    yield* persistent
-      .terminatePersistentSandbox({ persistentSandboxId })
+    yield* ops
+      .terminatePersistent({ persistentSandboxId })
       .pipe(Effect.catchTag("PersistentSandboxNotFound", () => Effect.void));
   }),
 });
 
 /** Create a persistent sandbox in `target`'s app. */
 export const createPersistentSandbox = Effect.fn(function* (
+  ops: SandboxOps,
   target: SandboxTarget,
   options: PersistentSandboxCreateOptions = {},
 ) {
-  const imageId = yield* resolveSandboxImage(target, options.image);
-  const created = yield* persistent.createPersistentSandbox({
+  const imageId = yield* resolveSandboxImage(ops, target, options.image);
+  const created = yield* ops.createPersistent({
     appId: target.appId,
     definition: definitionOf(imageId, { ...options, ...PERSISTENT_SESSION }),
   });
@@ -975,5 +1034,5 @@ export const createPersistentSandbox = Effect.fn(function* (
       message: "Modal returned no persistent sandbox id",
     });
   }
-  return persistentSandboxHandle(created.persistentSandboxId, target);
+  return persistentSandboxHandle(ops, created.persistentSandboxId, target);
 });

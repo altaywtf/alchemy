@@ -3,37 +3,39 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import { makeModalBinding } from "./BindingHttp.ts";
-import type { ModalClient } from "./ModalBindings.ts";
 import type { Secret } from "./Secret.ts";
 import { WriteSecret, type WriteSecretClient } from "./WriteSecret.ts";
+
+/** The operations the client calls, resolved by `ModalBindings.withCredentials`. */
+const WriteSecretOps = Effect.all({ getInfo: secret.secretGetInfo, update: secret.updateSecret });
+
+type WriteSecretOps = Effect.Success<typeof WriteSecretOps>;
 
 /** A write client over a secret id. */
 export const makeWriteSecretClient = (
   secretId: Effect.Effect<string>,
-  client: ModalClient,
+  ops: WriteSecretOps,
 ): WriteSecretClient => ({
   secretId,
   put: (env) =>
-    client(
-      Effect.gen(function* () {
-        const id = yield* secretId;
-        const { metadata } = yield* secret.secretGetInfo({ secretId: id });
-        const values = Object.entries(env).map(([key, value]) => ({
-          key,
-          value: Redacted.isRedacted(value) ? Redacted.value(value) : value,
-        }));
-        const removed = (metadata?.keys ?? []).filter((key) => !(key in env));
-        yield* secret.updateSecret({
-          secretId: id,
-          updates: [...values, ...removed.map((key) => ({ key }))],
-        });
-      }),
-    ),
+    Effect.gen(function* () {
+      const id = yield* secretId;
+      const { metadata } = yield* ops.getInfo({ secretId: id });
+      const values = Object.entries(env).map(([key, value]) => ({
+        key,
+        value: Redacted.isRedacted(value) ? Redacted.value(value) : value,
+      }));
+      const removed = (metadata?.keys ?? []).filter((key) => !(key in env));
+      yield* ops.update({
+        secretId: id,
+        updates: [...values, ...removed.map((key) => ({ key }))],
+      });
+    }),
 });
 
 /**
- * {@link WriteSecret} over Modal's API. Binds the deployer's Modal token onto
- * the host; Modal tokens act on the whole workspace.
+ * {@link WriteSecret} over Modal's API. Grants the host's identity (a scoped
+ * `Modal.ServiceUser`) the `contributor` role on the secret's environment.
  *
  * @layer
  * @product Secret
@@ -43,9 +45,11 @@ export const WriteSecretHttp = Layer.effect(
   WriteSecret,
   makeModalBinding({
     tag: "Modal.WriteSecret",
-    make: Effect.fn(function* (resource: Secret, client) {
+    operations: WriteSecretOps,
+    role: "contributor",
+    make: Effect.fn(function* (resource: Secret, ops) {
       const secretId = yield* resource.secretId;
-      return makeWriteSecretClient(secretId, client);
+      return makeWriteSecretClient(secretId, ops);
     }),
   }),
 );
