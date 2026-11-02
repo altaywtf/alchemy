@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
-import { BindingAgent, RotatedSecret, SharedVolume } from "./fixtures/resources.ts";
+import { BindingAgent, ProbeWebhook, RotatedSecret, SharedVolume } from "./fixtures/resources.ts";
 import E2BWorker from "./fixtures/worker.ts";
 
 const providers = Layer.mergeAll(E2B.providers(), Cloudflare.providers());
@@ -24,6 +24,7 @@ test.provider(
           yield* BindingAgent;
           yield* SharedVolume;
           yield* RotatedSecret;
+          yield* ProbeWebhook;
           const worker = yield* E2BWorker;
           return { url: worker.url.as<string>() };
         }),

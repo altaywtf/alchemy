@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
-import { BindingAgent, RotatedSecret, SharedVolume } from "./fixtures/resources.ts";
+import { BindingAgent, ProbeWebhook, RotatedSecret, SharedVolume } from "./fixtures/resources.ts";
 import E2BWorker from "./fixtures/worker.ts";
 
 const providers = Layer.mergeAll(E2B.providers(), Cloudflare.providers());
@@ -23,6 +23,7 @@ const Stack = Alchemy.Stack(
     const agent = yield* BindingAgent;
     yield* SharedVolume;
     yield* RotatedSecret;
+    yield* ProbeWebhook;
     const worker = yield* E2BWorker;
     return { url: worker.url.as<string>(), templateId: agent.templateId };
   }),
@@ -257,6 +258,19 @@ describe("ReadTeam", () => {
     Effect.gen(function* () {
       const body = yield* get<{ count: number }>("/team");
       expect(body.count).toBeGreaterThan(0);
+    }),
+    { tags, timeout: 120_000 },
+  );
+});
+
+describe("ReadWebhook", () => {
+  test(
+    "reads a declared webhook's delivery history and stats",
+    Effect.gen(function* () {
+      const body = yield* get<{ groups: number; total: number }>("/webhook");
+      // A wrong or missing webhook id fails the route with NotFound.
+      expect(typeof body.groups).toBe("number");
+      expect(typeof body.total).toBe("number");
     }),
     { tags, timeout: 120_000 },
   );

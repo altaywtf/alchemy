@@ -12,3 +12,10 @@ export const SharedVolume = E2B.Volume("SharedVolume", {});
 
 /** A secret the fixture rotates with WriteSecret. */
 export const RotatedSecret = E2B.Secret("RotatedSecret", { value: Redacted.make("first") });
+
+/** A webhook the fixture reads delivery history from with ReadWebhook. */
+export const ProbeWebhook = E2B.Webhook("ProbeWebhook", {
+  url: "https://example.com/alchemy-e2b-probe",
+  events: ["sandbox.lifecycle.killed"],
+  signatureSecret: Redacted.make("alchemy-e2b-probe"),
+});

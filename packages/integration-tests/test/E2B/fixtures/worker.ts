@@ -6,7 +6,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
-import { BindingAgent, RotatedSecret, SharedVolume } from "./resources.ts";
+import { BindingAgent, ProbeWebhook, RotatedSecret, SharedVolume } from "./resources.ts";
 
 const BindingsLive = Layer.mergeAll(
   E2B.CreateSandboxHttp,
@@ -19,6 +19,7 @@ const BindingsLive = Layer.mergeAll(
   E2B.ReadWriteVolumeHttp,
   E2B.WriteSecretHttp,
   E2B.ReadTeamHttp,
+  E2B.ReadWebhookHttp,
 );
 
 export default class E2BWorker extends Cloudflare.Worker<E2BWorker>()(
@@ -36,6 +37,7 @@ export default class E2BWorker extends Cloudflare.Worker<E2BWorker>()(
     const shared = yield* E2B.ReadWriteVolume(SharedVolume);
     const rotate = yield* E2B.WriteSecret(RotatedSecret);
     const team = yield* E2B.ReadTeam();
+    const probe = yield* E2B.ReadWebhook(ProbeWebhook);
 
     /** A sandbox from the bound template, killed when the request ends. */
     const scopedSandbox = (options?: E2B.CreateSandboxOptions) =>
@@ -250,6 +252,13 @@ export default class E2BWorker extends Cloudflare.Worker<E2BWorker>()(
             const sandbox = yield* sandboxes.create({ timeout: 600, metadata: { leftover: name } });
             const secret = yield* secrets.put(name, Redacted.make("left behind"));
             return { sandboxId: sandbox.sandboxId, secretId: secret.secretId };
+          }),
+        // ReadWebhook: delivery history and stats of a declared webhook.
+        "/webhook": () =>
+          Effect.gen(function* () {
+            const deliveries = yield* probe.deliveries({});
+            const stats = yield* probe.stats({});
+            return { groups: deliveries.data.length, total: stats.total };
           }),
         // ReadTeam: the lifecycle event log.
         "/team": () =>
