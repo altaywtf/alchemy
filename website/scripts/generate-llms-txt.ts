@@ -515,6 +515,30 @@ const SECTIONS: Section[] = [
     },
   },
   {
+    heading: "Daytona",
+    intro:
+      "Daytona sandboxes from Workers and Lambda: snapshots (images, Dockerfile builds, warm bases), volumes, secrets the sandbox can't read, the in-sandbox toolbox, scoped API keys, and organization settings.",
+    pages: {
+      slugs: ["daytona/index", "daytona/setup"],
+    },
+  },
+  {
+    heading: "Daytona — Tutorial",
+    pages: { directory: "daytona/tutorial" },
+  },
+  {
+    heading: "Daytona — Sandboxes",
+    pages: { directory: "daytona/sandboxes" },
+  },
+  {
+    heading: "Daytona — Security",
+    pages: { directory: "daytona/security" },
+  },
+  {
+    heading: "Daytona — Organization",
+    pages: { directory: "daytona/organization" },
+  },
+  {
     heading: "Better Auth",
     intro:
       "Better Auth as an Effect service on Workers and Lambda: a tutorial, sign-in providers, database layers, and guides for config, middleware, secondary storage, migrations, and upgrades.",

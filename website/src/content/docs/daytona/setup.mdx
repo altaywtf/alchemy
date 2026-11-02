@@ -1,0 +1,43 @@
+---
+title: Setup
+description: Give Alchemy a Daytona API key.
+---
+
+import PackageManagers from "../../../components/PackageManagers.astro";
+
+Sign up at [app.daytona.io](https://app.daytona.io) and create an API key under **Keys**. Give it every permission: Alchemy creates narrower keys from it for each Worker.
+
+Use a separate organization for tests. Tests create and delete sandboxes, snapshots, volumes, secrets and keys.
+
+## Add the provider
+
+<PackageManagers add="@alchemy.run/daytona" />
+
+Then add `Daytona.providers()` next to your cloud's providers:
+
+```typescript
+// alchemy.run.ts
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Daytona from "@alchemy.run/daytona";
+import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+
+export default Alchemy.Stack(
+  "App",
+  { providers: Layer.mergeAll(Cloudflare.providers(), Daytona.providers()) },
+  Effect.void,
+);
+```
+
+## Store the key in a profile
+
+```sh
+alchemy profile edit --add Daytona
+```
+
+Paste the key when asked. Leave the API URL empty unless you run Daytona yourself.
+
+## CI
+
+Set `DAYTONA_API_KEY` as a secret in your CI. Set `DAYTONA_API_URL` only for a self-hosted Daytona.

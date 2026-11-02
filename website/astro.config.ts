@@ -42,6 +42,7 @@ function providersSidebarEntry() {
       { label: "PlanetScale", link: "/planetscale" },
       { label: "Neon", link: "/neon" },
       { label: "Turso", link: "/turso" },
+      { label: "Daytona", link: "/daytona" },
       { label: "Prisma", link: "/prisma" },
       { label: "Better Auth", link: "/better-auth" },
       { label: "Axiom", link: "/axiom" },
@@ -1352,6 +1353,38 @@ export default defineConfig({
               ],
             },
             providerResourcesEntry("Turso"),
+          ],
+        },
+        {
+          label: "Daytona",
+          items: [
+            { label: "Overview", link: "/daytona" },
+            { label: "Setup", link: "/daytona/setup" },
+            {
+              label: "Tutorial",
+              items: [{ autogenerate: { directory: "daytona/tutorial" } }],
+            },
+            {
+              label: "Sandboxes",
+              items: [
+                { label: "Sandboxes", link: "/daytona/sandboxes/sandboxes" },
+                { label: "Snapshots", link: "/daytona/sandboxes/snapshots" },
+                { label: "Toolbox", link: "/daytona/sandboxes/toolbox" },
+                { label: "Volumes", link: "/daytona/sandboxes/volumes" },
+              ],
+            },
+            {
+              label: "Security",
+              items: [
+                { label: "Network & secrets", link: "/daytona/security/network-and-secrets" },
+                { label: "API keys", link: "/daytona/security/api-keys" },
+              ],
+            },
+            {
+              label: "Organization",
+              items: [{ label: "Organization", link: "/daytona/organization/organization" }],
+            },
+            providerResourcesEntry("Daytona"),
           ],
         },
         {

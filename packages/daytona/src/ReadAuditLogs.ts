@@ -16,10 +16,10 @@ export interface ReadAuditLogsClient extends ScopedModule<typeof audit> {}
  * The host gets its own Daytona API key with `read:audit_logs`.
  *
  * ### Reading the Audit Log
- * **Example:** Sandbox deletions in a time range
+ * **Example:** The latest entries
  * ```typescript
  * const audit = yield* Daytona.ReadAuditLogs();
- * const page = yield* audit.getOrganizationAuditLogs({ action: "delete", targetType: "sandbox", from, to });
+ * const page = yield* audit.getOrganizationAuditLogs({ limit: 50 });
  * ```
  *
  * @binding

@@ -1,0 +1,59 @@
+---
+title: Daytona
+description: Run code in Daytona sandboxes from your Workers, with snapshots, volumes and secrets declared in the same Stack.
+---
+
+Daytona runs isolated sandboxes for code you don't fully trust: agent tool calls, user code, test runs. Declare the images, volumes and secrets in your Stack, and create, drive and delete sandboxes from any Worker or Lambda.
+
+New here? [Set up credentials](/daytona/setup) first, then [build the tutorial](/daytona/tutorial/part-1).
+
+## Run a command in a sandbox
+
+```typescript
+// src/Images.ts
+import * as Daytona from "@alchemy.run/daytona";
+
+export const Base = Daytona.Snapshot("Base", {
+  image: "node:22-bookworm-slim",
+  cpu: 1,
+  memory: 1,
+  disk: 3,
+});
+```
+
+```typescript
+// src/Api.ts
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Daytona from "@alchemy.run/daytona";
+import * as Effect from "effect/Effect";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { Base } from "./Images.ts";
+
+export default class Api extends Cloudflare.Worker<Api>()(
+  "Api",
+  { main: import.meta.url },
+  Effect.gen(function* () {
+    const sandboxes = yield* Daytona.CreateSandbox(Base);
+    return {
+      fetch: Effect.gen(function* () {
+        const sandbox = yield* Effect.acquireRelease(sandboxes.create(), (s) =>
+          sandboxes.delete(s.sandboxId).pipe(Effect.ignore),
+        );
+        return yield* HttpServerResponse.json(yield* sandbox.exec("node --version"));
+      }).pipe(Effect.scoped, Effect.orDie),
+    };
+  }).pipe(Effect.provide(Daytona.CreateSandboxHttp)),
+) {}
+```
+
+The Worker gets its own Daytona API key that can only create and delete sandboxes. Every sandbox comes back as a handle with the whole toolbox: processes, files, git, language servers, previews, forks and snapshots.
+
+## Where next
+
+- [Sandboxes](/daytona/sandboxes/sandboxes): per request, per user, or long-lived dev boxes
+- [Snapshots](/daytona/sandboxes/snapshots): images, Dockerfile builds, and warm bases to fork from
+- [Toolbox](/daytona/sandboxes/toolbox): commands, files, git, previews and SSH
+- [Volumes](/daytona/sandboxes/volumes): files that outlive sandboxes
+- [Network & secrets](/daytona/security/network-and-secrets): allowlists and credentials a sandbox can use but not read
+- [API keys](/daytona/security/api-keys): what each binding can do
+- [Organization](/daytona/organization/organization): roles, members, SSO, telemetry, webhooks, regions

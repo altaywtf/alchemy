@@ -1,0 +1,55 @@
+---
+title: Volumes
+description: Keep files in volumes that outlive sandboxes, shared or one per user.
+---
+
+A volume is a persistent disk, backed by object storage, that sandboxes mount at a path. Its files outlive every sandbox that mounts it, and several sandboxes can mount it at once.
+
+## Declare a shared volume
+
+```typescript
+// src/Storage.ts
+import * as Daytona from "@alchemy.run/daytona";
+
+export const Cache = Daytona.Volume("Cache", {});
+```
+
+## Mount it in a dev box
+
+```typescript
+// src/DevBox.ts
+import * as Daytona from "@alchemy.run/daytona";
+import { Base } from "./Images.ts";
+import { Cache } from "./Storage.ts";
+
+export const DevBox = Daytona.Sandbox("DevBox", {
+  snapshot: Base,
+  volumes: [{ volume: Cache, mountPath: "/cache" }],
+});
+```
+
+## Mount it in sandboxes you create
+
+```typescript
+const cache = yield* Cache;
+const sandbox = yield* sandboxes.create({
+  volumes: [{ volumeId: cache.volumeId, mountPath: "/cache" }],
+});
+```
+
+## One volume per user
+
+```typescript
+const volumes = yield* Daytona.CreateVolume({ onDestroy: "delete", prefix: "user-" });
+const home = yield* volumes.getOrCreate({ name: `user-${user}` });
+```
+
+The Worker's key can read, create and delete volumes. `getOrCreate` waits until a new volume is ready. Volumes have no labels, so destroy deletes the ones whose names start with `prefix`, and the binding refuses names outside it.
+
+## Delete a volume
+
+```typescript
+yield* volumes.delete(home.volumeId);
+```
+
+Deleting a volume deletes its files.

@@ -1,0 +1,38 @@
+---
+title: API keys
+description: See which key each binding gets, and create keys for CI or other programs.
+---
+
+Daytona checks every request against the permissions of its API key. Each binding creates its own key for its host, with only what it needs:
+
+| Binding | Permissions |
+| --- | --- |
+| `CreateSandbox`, `ConnectSandbox` | `write:sandboxes`, `delete:sandboxes` |
+| `CreateVolume` | `read:volumes`, `write:volumes`, `delete:volumes` |
+| `CreateSecret` | `manage:secrets` |
+| `CreateSnapshot` | `write:snapshots`, `delete:snapshots`, `write:sandboxes`, `delete:sandboxes` |
+| `ReadOrganization` | `read:limits` |
+| `ReadUsage` | `read:billing` |
+| `ReadAuditLogs` | `read:audit_logs` |
+
+Permissions apply to a kind of object, not one object: a key with `write:sandboxes` can create any sandbox in the organization.
+
+## Create a key yourself
+
+```typescript
+// src/Keys.ts
+import * as Daytona from "@alchemy.run/daytona";
+
+export const Ci = Daytona.ApiKey("Ci", {
+  permissions: ["write:snapshots", "delete:snapshots"],
+});
+```
+
+`Ci.value` is the key. Daytona shows it once; Alchemy keeps it in state. Changing the permissions creates a new key and deletes the old one.
+
+## Read the audit log
+
+```typescript
+const audit = yield* Daytona.ReadAuditLogs();
+const page = yield* audit.getOrganizationAuditLogs({ limit: 50 });
+```

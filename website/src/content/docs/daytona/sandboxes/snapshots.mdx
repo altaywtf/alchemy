@@ -1,0 +1,116 @@
+---
+title: Snapshots
+description: Pull an image, build a Dockerfile on Daytona, or capture a warm base that sandboxes start from.
+---
+
+A snapshot is the image a sandbox boots from, with its default size. Snapshots can't be changed: changing what one is built from replaces it.
+
+## Pull an image
+
+```typescript
+// src/Images.ts
+import * as Daytona from "@alchemy.run/daytona";
+
+export const Node = Daytona.Snapshot("Node", {
+  image: "node:22-bookworm",
+  cpu: 2,
+  memory: 4,
+  disk: 10,
+});
+```
+
+Use a fixed tag or digest. Daytona rejects `latest`, `lts` and `stable`, and deploy fails before calling it.
+
+## Pull from a private registry
+
+```typescript
+// src/Images.ts
+import * as Daytona from "@alchemy.run/daytona";
+import * as Alchemy from "alchemy";
+
+export const Ghcr = Daytona.Registry("Ghcr", {
+  url: "ghcr.io",
+  username: "alchemy-run",
+  password: Alchemy.Secret("GHCR_TOKEN"),
+});
+
+export const App = Daytona.Snapshot("App", {
+  image: "ghcr.io/alchemy-run/app:1.4.0",
+  registry: Ghcr,
+});
+```
+
+Daytona picks the registry whose `url` matches the image's host.
+
+## Build a Dockerfile on Daytona
+
+```typescript
+// src/Images.ts
+import * as Dockerfile from "@alchemy.run/docker/Dockerfile";
+import * as Daytona from "@alchemy.run/daytona";
+
+export const Tools = Daytona.Snapshot("Tools", {
+  dockerfile: Dockerfile.inline`
+    FROM node:22-bookworm
+    RUN apt-get update && apt-get install -y git ripgrep
+  `,
+});
+```
+
+Daytona's builders run the build; you don't need Docker. Dockerfiles that `COPY` local files aren't supported yet: fetch the files in a `RUN` step, or build the image elsewhere and pass `image`.
+
+## Capture a warm base
+
+```typescript
+// src/Images.ts
+import * as Daytona from "@alchemy.run/daytona";
+
+export const Base = Daytona.Snapshot("Base", { image: "node:22-bookworm" });
+
+export const Warm = Daytona.Snapshot("Warm", {
+  from: Base,
+  run: [
+    "git clone https://github.com/alchemy-run/alchemy /home/daytona/alchemy",
+    "cd /home/daytona/alchemy && corepack enable && pnpm install",
+  ],
+});
+```
+
+Deploy starts a sandbox from `Base`, runs the commands, captures its disk as `Warm`, and deletes the sandbox. Sandboxes created from `Warm` start with the repository cloned and installed.
+
+## Keep sandboxes warm
+
+```typescript
+export const Pool = Daytona.WarmPool("Pool", { snapshot: Warm, size: 4 });
+```
+
+Daytona keeps four started sandboxes of `Warm` ready and hands one out on each create. They are billed while they wait.
+
+## Build snapshots at runtime
+
+```typescript
+// construction
+const images = yield* Daytona.CreateSnapshot({ onDestroy: "delete", prefix: "repo-" });
+const warm = yield* Warm;
+// per request
+const name = `repo-${owner}-${repo}`;
+const base =
+  (yield* images.get(name)) ??
+  (yield* images.create({
+    name,
+    from: warm.name,
+    run: [`git clone https://github.com/${owner}/${repo} /home/daytona/repo`],
+  }));
+```
+
+`CreateSnapshot` builds a base per repository the first time a user needs one.
+
+## Snapshot a running sandbox
+
+```typescript
+yield* sandbox.createSandboxSnapshot({ name: `checkpoint-${task}` });
+```
+
+## Deactivated snapshots
+
+Daytona deactivates a snapshot nobody used for two weeks. Deploy reactivates it; at runtime, call `images.activate(name)`.

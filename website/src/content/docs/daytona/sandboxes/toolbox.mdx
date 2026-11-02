@@ -1,0 +1,82 @@
+---
+title: Toolbox
+description: Run commands, edit files, use git and language servers, open previews and SSH into a sandbox.
+---
+
+Every sandbox handle carries Daytona's toolbox, with Daytona's own parameters. Get a handle from `CreateSandbox` or `ConnectSandbox`.
+
+## Run a shell command
+
+```typescript
+const result = yield* sandbox.exec("ls -la && cat package.json", { cwd: "/home/daytona/repo" });
+// { exitCode: 0, result: "..." }
+```
+
+A non-zero exit comes back in `exitCode`; it doesn't fail the Effect.
+
+## Long-running processes
+
+```typescript
+yield* sandbox.process.createSession({ sessionId: "dev" });
+yield* sandbox.process.sessionExecuteCommand({
+  sessionId: "dev",
+  command: "pnpm dev --port 3000",
+  runAsync: true,
+});
+```
+
+Sessions keep running between calls. Read their output with `getSessionCommandLogs`.
+
+## Files
+
+```typescript
+yield* sandbox.fs.createFolder({ path: "/home/daytona/out", mode: "755" });
+const files = yield* sandbox.fs.listFiles({ path: "/home/daytona/out" });
+const hits = yield* sandbox.fs.findInFiles({ path: "/home/daytona/repo/src", pattern: "TODO" });
+```
+
+## Git
+
+```typescript
+yield* sandbox.git.cloneRepository({ url: "https://github.com/alchemy-run/alchemy", path: "/home/daytona/repo" });
+const status = yield* sandbox.git.getStatus({ path: "/home/daytona/repo" });
+```
+
+## Previews
+
+```typescript
+const preview = yield* sandbox.getPortPreviewUrl({ port: 3000 });
+const signed = yield* sandbox.getSignedPortPreviewUrl({ port: 3000, expiresInSeconds: 3600 });
+```
+
+A preview URL needs a token unless the sandbox is `public`. A signed URL works without one until it expires.
+
+## SSH
+
+```typescript
+const ssh = yield* sandbox.createSshAccess({ expiresInMinutes: 60 });
+```
+
+## Language servers and code interpreter
+
+```typescript
+yield* sandbox.lsp.start({ languageId: "typescript", pathToProject: "/home/daytona/repo" });
+const ctx = yield* sandbox.interpreter.createInterpreterContext({ language: "python" });
+```
+
+## Computer use
+
+```typescript
+yield* sandbox.computerUse.startComputerUse();
+const shot = yield* sandbox.computerUse.takeScreenshot();
+```
+
+Computer use needs a snapshot with a desktop. It is billed like any running sandbox.
+
+## Telemetry
+
+```typescript
+const logs = yield* sandbox.getSandboxLogs({ from, to });
+```
+
+Point the whole organization's telemetry at your own backend with [OrganizationOtelConfig](/daytona/organization/organization#export-telemetry).

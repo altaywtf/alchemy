@@ -1,0 +1,96 @@
+---
+title: Organization
+description: Manage roles, members, SSO, settings, telemetry export and webhooks for your Daytona organization.
+---
+
+## Roles
+
+```typescript
+// src/Team.ts
+import * as Daytona from "@alchemy.run/daytona";
+
+export const Developer = Daytona.OrganizationRole("Developer", {
+  description: "Run sandboxes",
+  permissions: ["write:sandboxes", "delete:sandboxes", "read:volumes"],
+});
+```
+
+## Invite someone
+
+```typescript
+export const Alice = Daytona.OrganizationInvitation("Alice", {
+  email: "alice@example.com",
+  roles: [Developer],
+});
+```
+
+Destroy cancels the invitation if it is still pending.
+
+## Change a member's access
+
+```typescript
+export const Bob = Daytona.OrganizationMember("Bob", {
+  user: "bob@example.com",
+  role: "member",
+  roles: [Developer],
+});
+```
+
+Destroy puts back the access Bob had before. Set `removeOnDestroy: true` to remove him instead.
+
+## Settings
+
+```typescript
+export const Settings = Daytona.OrganizationSettings("Settings", {
+  defaultRegionId: "eu",
+  defaultQueueTimeout: "1 minute",
+});
+```
+
+Only the settings you declare change, and destroy puts the old values back.
+
+## Export telemetry
+
+```typescript
+import * as Alchemy from "alchemy";
+
+export const Telemetry = Daytona.OrganizationOtelConfig("Telemetry", {
+  endpoint: "https://api.axiom.co",
+  headers: { Authorization: Alchemy.Secret("AXIOM_TOKEN"), "X-Axiom-Dataset": "daytona" },
+});
+```
+
+## Single sign-on
+
+```typescript
+export const Sso = Daytona.IdentityProvider("Sso", {
+  issuerUrl: "https://login.example.com",
+  clientId: "daytona",
+  clientSecret: Alchemy.Secret("OIDC_CLIENT_SECRET"),
+  emailDomains: ["example.com"],
+  defaultRoles: [Developer],
+});
+```
+
+SSO needs a Daytona plan that includes it.
+
+## Webhooks
+
+```typescript
+export const Events = Daytona.Webhooks("Events", {});
+```
+
+This turns on delivery. Add endpoints in Daytona's webhook portal; get a link to it at runtime with `ReadOrganization`'s `getWebhookControllerAppPortalAccess`.
+
+## Your own compute
+
+```typescript
+export const Home = Daytona.Region("Home", {
+  proxyUrl: "https://proxy.daytona.example.com",
+  sshGatewayUrl: "ssh.daytona.example.com:2222",
+});
+
+export const Box1 = Daytona.Runner("Box1", { region: Home });
+```
+
+A custom region runs sandboxes on machines you operate. `Box1.apiKey` is the key you start the runner daemon with. Set `draining: true` to move sandboxes off a runner.
