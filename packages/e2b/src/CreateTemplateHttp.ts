@@ -2,9 +2,7 @@ import * as tags from "@distilled.cloud/e2b/tags";
 import * as templates from "@distilled.cloud/e2b/templates";
 import * as unstable from "@distilled.cloud/e2b/unstable";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import {
   CreateTemplate,
@@ -14,12 +12,6 @@ import {
 } from "./CreateTemplate.ts";
 import { bindE2B } from "./internal/Bindings.ts";
 import { planTemplateBuild, runTemplateBuild } from "./internal/TemplateBuild.ts";
-
-/**
- * A runtime build has no filesystem: every `COPY` source must come from the
- * spec's `files`. A path that reaches the filesystem fails.
- */
-const InMemoryBuild = Layer.mergeAll(FileSystem.layerNoop({}), Path.layer);
 
 /** The tag a build of these inputs carries. */
 const hashTag = (hash: string) => `alchemy-${hash.slice(0, 16)}`;
@@ -68,7 +60,7 @@ export const CreateTemplateHttp = Layer.succeed(
         );
 
     const build = Effect.fn("E2B.CreateTemplate.build")(function* (spec: RuntimeTemplateSpec) {
-      const plan = yield* planTemplateBuild(spec).pipe(Effect.provide(InMemoryBuild));
+      const plan = yield* planTemplateBuild(spec);
       const built = yield* auth.authorize(
         runTemplateBuild({ ...spec, tags: [...(spec.tags ?? []), hashTag(plan.hash)] }, plan),
       );
@@ -82,7 +74,7 @@ export const CreateTemplateHttp = Layer.succeed(
     const client: TemplatesClient = {
       build,
       getOrBuild: Effect.fn("E2B.CreateTemplate.getOrBuild")(function* (spec) {
-        const plan = yield* planTemplateBuild(spec).pipe(Effect.provide(InMemoryBuild));
+        const plan = yield* planTemplateBuild(spec);
         const existing = yield* get(spec.name);
         if (existing !== undefined) {
           const tagged = yield* auth.authorize(

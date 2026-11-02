@@ -1,4 +1,4 @@
-// A plain Node program, bundled and run as-is in every sandbox.
+// A plain JavaScript program, bundled and run as-is in every sandbox.
 import { createServer } from "node:http";
 
 const env = process.env;

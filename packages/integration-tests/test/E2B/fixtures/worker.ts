@@ -225,13 +225,7 @@ export default class E2BWorker extends Cloudflare.Worker<E2BWorker>()(
             const spec = {
               name,
               fromTemplate: "base",
-              files: [
-                {
-                  path: "greeting.txt",
-                  contents: "built at runtime",
-                  dest: "/home/user/greeting.txt",
-                },
-              ],
+              files: [{ path: "/home/user/greeting.txt", contents: "built at runtime" }],
             };
             const first = yield* templates.getOrBuild(spec);
             const second = yield* templates.getOrBuild(spec);

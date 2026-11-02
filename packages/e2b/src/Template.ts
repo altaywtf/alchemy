@@ -1,3 +1,5 @@
+import type { InlineDockerfile } from "@alchemy.run/docker/Dockerfile";
+import type { DockerfileBuild } from "@alchemy.run/docker/ImageSource";
 import * as templates from "@distilled.cloud/e2b/templates";
 import { Unowned } from "alchemy/AdoptPolicy";
 import type * as Bundle from "alchemy/Bundle/Bundle";
@@ -13,36 +15,43 @@ import {
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
+import { E2BUnexpectedResponse } from "./Errors.ts";
 import { e2bName, isGeneratedName } from "./internal/Ownership.ts";
-import {
-  APP_DIR,
-  bundleProgram,
-  DEFAULT_PORT,
-  DEFAULT_PROGRAM_IMAGE,
-  programCommands,
-  programEnv,
-} from "./internal/Program.ts";
+import { DEFAULT_PORT, makeBootstrap, programEnv, programReadyCmd } from "./internal/Program.ts";
 import {
   planTemplateBuild,
   runTemplateBuild,
+  type LoweredSource,
   type TemplateBuildSpec,
-  type TemplateSource,
+  type TemplateSteps,
 } from "./internal/TemplateBuild.ts";
+import { planSource } from "./internal/TemplatePlan.ts";
 import type { Providers } from "./Providers.ts";
 
-export type {
-  InlineDockerfile,
-  TemplateRegistry,
-  TemplateSource,
-} from "./internal/TemplateBuild.ts";
+export type { TemplateFile, TemplateRegistry, TemplateSteps } from "./internal/TemplateBuild.ts";
 
-export interface TemplateProps extends Omit<TemplateSource, "env">, PlatformProps {
+export interface TemplateProps extends Omit<TemplateSteps, "env">, PlatformProps {
+  /**
+   * A Dockerfile: a path (relative to the working directory) or inline
+   * content (`Dockerfile.inline` from `@alchemy.run/docker`). Lowered to
+   * E2B build steps; see the resource docs for what E2B supports.
+   * Exclusive with `image` and `fromTemplate` unless `main` is set, where
+   * it is the program's environment.
+   */
+  dockerfile?: string | InlineDockerfile;
+  /**
+   * The directory `COPY` / `ADD` sources are relative to, for a Dockerfile
+   * path. An inline Dockerfile has no build context.
+   * @default the working directory
+   */
+  context?: string;
   /**
    * A program to run in every sandbox: a module entrypoint, typically
    * `import.meta.url` in the class form. Alchemy bundles it, copies it into
-   * the template, and starts it with Node as the template's start command, so
-   * every sandbox boots with it already serving on {@link port}. The image
-   * must have Node 22 or later.
+   * the template under `/app`, and starts it with Bun as the template's start
+   * command, so every sandbox boots with it already serving on {@link port}.
+   * `image` / `dockerfile` are then the program's environment, which must
+   * have Bun; the default is `oven/bun:1`.
    * @default no program
    */
   main?: string;
@@ -57,8 +66,11 @@ export interface TemplateProps extends Omit<TemplateSource, "env">, PlatformProp
    * @default 3000
    */
   port?: number;
-  /** Bundler configuration for `main`. */
-  build?: Bundle.BundleConfig;
+  /**
+   * Bundler configuration for `main`, and `args` for the Dockerfile's
+   * `ARG`s (like `docker build --build-arg`).
+   */
+  build?: Bundle.BundleConfig & Pick<DockerfileBuild, "args">;
   /**
    * Environment variables for the template. With a program, also the
    * program's environment, after the values its bindings set.
@@ -134,14 +146,16 @@ export interface Template extends Resource<
  *
  * Build from a registry `image`, a `dockerfile` (a path or inline content),
  * or another template (`fromTemplate`). E2B builds remotely, so a deploy
- * needs no Docker daemon: Alchemy lowers the Dockerfile to E2B's build
- * steps and uploads only the `COPY` sources E2B has not seen, by content
- * hash. A deploy starts a new build only when the inputs change.
+ * needs no Docker daemon: Alchemy plans the Dockerfile with
+ * `@alchemy.run/docker`'s build plan, lowers it to E2B's build steps, and
+ * uploads only the `COPY` sources E2B has not seen, by content hash. A
+ * deploy starts a new build only when the inputs change.
  *
- * E2B's builder runs one stage. A Dockerfile with several `FROM`s,
- * `COPY --from`, or `ADD <url>` fails at plan time with
- * `UnsupportedDockerfileInstruction`. `EXPOSE`, `LABEL`, `VOLUME` and
- * `HEALTHCHECK` are ignored, as E2B ignores them. `CMD` / `ENTRYPOINT`
+ * E2B's builder runs one stage for `linux/amd64`. A Dockerfile with several
+ * `FROM`s, `COPY --from`, `ADD <url>`, heredocs, `RUN --mount` or `SHELL`
+ * fails at plan time with `UnsupportedDockerfile`, listing the lines.
+ * `EXPOSE`, `LABEL`, `VOLUME`, `HEALTHCHECK` and `STOPSIGNAL` are ignored,
+ * as E2B ignores them. An `ARG` becomes an environment variable. `CMD` / `ENTRYPOINT`
  * become the template's start command: it is captured running in the
  * snapshot, so every sandbox starts with it already up.
  *
@@ -174,7 +188,7 @@ export interface Template extends Resource<
  * export const Repo = E2B.Template("Repo", {
  *   context: "./sandbox",
  *   dockerfile: "./sandbox/Dockerfile",
- *   args: { NODE_VERSION: "22" },
+ *   build: { args: { NODE_VERSION: "22" } },
  * });
  * ```
  *
@@ -202,7 +216,8 @@ export interface Template extends Resource<
  * Give the template a `main` and an Effect, and every sandbox from it boots
  * with the program already serving HTTP on `port`. Alchemy bundles `main`,
  * copies it into the template, and E2B snapshots the template once the
- * program answers. The image defaults to `node:22-bookworm`.
+ * program answers. The program runs with Bun; the image defaults to
+ * `oven/bun:1`.
  *
  * **Example:** A program in every sandbox
  * ```typescript
@@ -225,10 +240,10 @@ export interface Template extends Resource<
  * ```
  *
  * ### Async program
- * A `main` without an Effect is bundled and run with Node as-is. It must
+ * A `main` without an Effect is bundled and run with Bun as-is. It must
  * listen on `PORT`. `E2B.InferEnv` types its `env`.
  *
- * **Example:** A plain Node server
+ * **Example:** A plain server
  * ```typescript
  * export const Server = E2B.Template("Server", {
  *   main: "./src/server.mjs",
@@ -267,7 +282,7 @@ export interface Template extends Resource<
  * ```typescript
  * export default class Program extends E2B.Template<Program>()(
  *   "Program",
- *   { main: import.meta.url, image: "node:24-bookworm", cpuCount: 4, memoryMB: 8192, port: 8080 },
+ *   { main: import.meta.url, image: "oven/bun:1-debian", cpuCount: 4, memoryMB: 8192, port: 8080 },
  *   Effect.gen(function* () {
  *     return { fetch: Effect.succeed(HttpServerResponse.text("ok")) };
  *   }),
@@ -312,52 +327,68 @@ const boundEnv = (bindings: ReadonlyArray<ResourceBinding<TemplateBinding>> | un
     )
     .reduce<Record<string, unknown>>((env, binding) => ({ ...env, ...binding.data?.env }), {});
 
-/** The build spec for a template: its source, plus its bundled program when it has one. */
-const specOf = Effect.fn(function* (
+/**
+ * Plans a template's build: its Dockerfile or program lowered through
+ * `BuildPlan`, then its own E2B steps.
+ */
+const planOf = Effect.fn(function* (
   name: string,
   news: TemplateProps,
   bindings: ReadonlyArray<ResourceBinding<TemplateBinding>> | undefined,
 ) {
-  const { main, handler, port, build, env, ...source } = news;
-  if (main === undefined) {
-    return {
-      ...source,
-      name,
-      env: yield* programEnvFor(env),
-    } satisfies TemplateBuildSpec;
-  }
+  const { main, handler, port, build, env, dockerfile, context, image, ...steps } = news;
   const programPort = port ?? DEFAULT_PORT;
-  const program = yield* bundleProgram({
-    main,
-    handler,
-    build,
-    isExternal: (news as { isExternal?: boolean }).isExternal,
-  });
-  const commands = programCommands(programPort);
-  const hasSource =
-    source.image !== undefined ||
-    source.dockerfile !== undefined ||
-    source.fromTemplate !== undefined;
-  return {
-    ...source,
+  const { args, ...bundle } = build ?? {};
+  let lowered: LoweredSource | undefined;
+  if (main !== undefined) {
+    // The program, on `image` / `dockerfile` as its environment.
+    lowered = yield* planSource(
+      {
+        main,
+        ...(handler !== undefined ? { handler } : {}),
+        ...(image !== undefined ? { image } : {}),
+        ...(dockerfile !== undefined ? { dockerfile } : {}),
+        ...(context !== undefined ? { context } : {}),
+        build: bundle,
+      },
+      {
+        port: programPort,
+        ...(args !== undefined ? { args } : {}),
+        ...((news as { isExternal?: boolean }).isExternal
+          ? {}
+          : { bootstrap: makeBootstrap(handler ?? "default") }),
+      },
+    );
+  } else if (dockerfile !== undefined || context !== undefined) {
+    if (image !== undefined) {
+      return yield* new E2BUnexpectedResponse({
+        message: `template ${name}: set one of image or dockerfile`,
+      });
+    }
+    lowered = yield* planSource(
+      {
+        ...(dockerfile !== undefined ? { dockerfile } : {}),
+        ...(context !== undefined ? { context } : {}),
+        ...(args !== undefined ? { build: { args } } : {}),
+      },
+      args !== undefined ? { args } : {},
+    );
+  }
+  const spec = {
+    ...steps,
+    ...(lowered === undefined && image !== undefined ? { image } : {}),
     name,
-    ...(hasSource ? {} : { image: DEFAULT_PROGRAM_IMAGE }),
-    files: [
-      ...(source.files ?? []),
-      ...program.files.map((file) => ({
-        path: `__alchemy__/${file.path}`,
-        contents: file.contents,
-        dest: `${APP_DIR}/${file.path}`,
-      })),
-    ],
-    env: yield* programEnv(programPort, boundEnv(bindings), env),
-    startCmd: source.startCmd ?? commands.startCmd,
-    readyCmd: source.readyCmd ?? commands.readyCmd,
+    env:
+      main === undefined
+        ? yield* plainEnv(env)
+        : yield* programEnv(programPort, boundEnv(bindings), env),
+    ...(main !== undefined ? { readyCmd: steps.readyCmd ?? programReadyCmd(programPort) } : {}),
   } satisfies TemplateBuildSpec;
+  return { spec, plan: yield* planTemplateBuild(spec, lowered) };
 });
 
 /** `env` for a template without a program: plain values only. */
-const programEnvFor = (env: Readonly<Record<string, unknown>> | undefined) =>
+const plainEnv = (env: Readonly<Record<string, unknown>> | undefined) =>
   Effect.succeed(
     env === undefined
       ? undefined
@@ -387,8 +418,7 @@ export const TemplateProvider = () =>
           // unchanged `context` path still rebuilds.
           // Bindings may be unresolved here; the engine reconciles when they
           // change. Diff compares the hash of everything else.
-          const unbound = yield* specOf(name, news, undefined);
-          const plan = yield* planTemplateBuild(unbound);
+          const { plan } = yield* planOf(name, news, undefined);
           if (plan.hash !== output.sourceHash || news.force) return { action: "update" } as const;
           if ((news.public ?? false) !== output.public) return { action: "update" } as const;
           return undefined;
@@ -412,17 +442,14 @@ export const TemplateProvider = () =>
         }),
         reconcile: Effect.fn(function* ({ id, news, output, bindings, session }) {
           const name = output?.name ?? (yield* e2bName(id, news.name));
-          const spec = yield* specOf(name, news, bindings);
+          const { spec, plan } = yield* planOf(name, news, bindings);
 
           // Observe
           const observed = yield* observeTemplate(output?.templateId, name);
-          const plan = yield* planTemplateBuild(spec);
-          const unbound =
-            bindings === undefined || bindings.length === 0
-              ? undefined
-              : yield* specOf(name, news, undefined);
           const sourceHash =
-            unbound === undefined ? plan.hash : (yield* planTemplateBuild(unbound)).hash;
+            bindings === undefined || bindings.length === 0
+              ? plan.hash
+              : (yield* planOf(name, news, undefined)).plan.hash;
 
           // Ensure — build when there is no ready build of these exact inputs.
           let attrs: TemplateAttributes;

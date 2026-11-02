@@ -57,21 +57,26 @@
     "build:package": "node scripts/build.ts"
   },
   "dependencies": {
+    "@alchemy.run/docker": "workspace:*",
     "@distilled.cloud/core": "workspace:*",
-    "@distilled.cloud/e2b": "workspace:*",
-    "rolldown": "catalog:"
+    "@distilled.cloud/e2b": "workspace:*"
   },
   "devDependencies": {
-    "@effect/platform-node": "catalog:",
+    "@effect/platform-bun": "catalog:",
     "@types/bun": "catalog:",
     "alchemy": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {
-    "@effect/platform-node": "catalog:",
+    "@effect/platform-bun": "catalog:",
     "alchemy": "workspace:*",
     "effect": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@effect/platform-bun": {
+      "optional": true
+    }
   },
   "alchemy": {
     "contributes": [

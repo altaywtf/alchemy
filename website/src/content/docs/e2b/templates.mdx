@@ -32,7 +32,7 @@ export const Agent = E2B.Template("Agent", {
 
 Point `dockerfile` at a file instead to use its directory as the build context. `COPY` sources are uploaded once per content, so a deploy uploads only files that changed.
 
-E2B's builder runs one stage. A Dockerfile with several `FROM`s, `COPY --from`, or `ADD <url>` fails at plan time with `UnsupportedDockerfileInstruction`, before anything is created. `EXPOSE`, `LABEL`, `VOLUME`, and `HEALTHCHECK` are ignored.
+E2B's builder runs one stage. A Dockerfile with several `FROM`s, `COPY --from`, `ADD <url>`, heredocs, `RUN --mount`, or `SHELL` fails at plan time with `UnsupportedDockerfile`, listing the lines, before anything is created. `EXPOSE`, `LABEL`, `VOLUME`, `HEALTHCHECK`, and `STOPSIGNAL` are ignored, and an `ARG` becomes an environment variable.
 
 ## From another template
 
@@ -84,12 +84,13 @@ const templates = yield* E2B.CreateTemplate();
 // in fetch:
 const template = yield* templates.getOrBuild({
   name: `repo-${slug}`,
-  dockerfile: { content: dockerfileText },
-  files: [{ path: "package.json", contents: packageJson }],
+  image: "node:22-bookworm",
+  files: [{ path: "/home/user/app/package.json", contents: packageJson }],
+  run: ["cd /home/user/app && npm install"],
 });
 ```
 
-A runtime build takes the same props, with the Dockerfile inline and `COPY` sources from `files`. `getOrBuild` builds only when no ready build of the same inputs exists. Delete runtime templates when you no longer need them: destroying the Worker does not.
+A runtime build takes E2B's own build inputs: a base `image` or `fromTemplate`, then `env`, `files` from memory, and `run` steps. `getOrBuild` builds only when no ready build of the same inputs exists. Delete runtime templates when you no longer need them: destroying the Worker does not.
 
 ## Deploys and replacement
 

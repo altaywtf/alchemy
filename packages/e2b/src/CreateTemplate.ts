@@ -5,18 +5,17 @@ import * as Binding from "alchemy/Binding";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
 import type * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
-import type { TemplateBuildFailed, UnsupportedDockerfileInstruction } from "./Errors.ts";
-import type { InlineDockerfile, TemplateBuildSpec } from "./internal/TemplateBuild.ts";
+import type { TemplateBuildFailed } from "./Errors.ts";
+import type { TemplateBuildSpec } from "./internal/TemplateBuild.ts";
 import type { E2BError } from "./Sandbox.ts";
 
 /**
- * What a runtime build takes: a `Template`'s props, built in memory. The
- * Dockerfile is inline content, and `COPY` sources come from `files`; there
- * is no build-context directory where a Worker runs.
+ * What a runtime build takes: E2B's own build inputs (a base `image` or
+ * `fromTemplate`, then `env`, `files` and `run` steps), with no Dockerfile.
+ * Files come from memory; there is no build-context directory where a
+ * Worker runs.
  */
-export type RuntimeTemplateSpec = Omit<TemplateBuildSpec, "context" | "dockerfile"> & {
-  readonly dockerfile?: InlineDockerfile;
-};
+export type RuntimeTemplateSpec = TemplateBuildSpec;
 
 /** A built template. */
 export interface TemplateInfo {
@@ -27,11 +26,7 @@ export interface TemplateInfo {
 }
 
 /** Errors a runtime build can fail with. */
-export type TemplateBuildError =
-  | E2BError
-  | TemplateBuildFailed
-  | UnsupportedDockerfileInstruction
-  | PlatformError.PlatformError;
+export type TemplateBuildError = E2BError | TemplateBuildFailed | PlatformError.PlatformError;
 
 /** E2B templates: build, look up, tag and delete them at runtime. */
 export interface TemplatesClient {
@@ -105,8 +100,8 @@ export interface TemplatesClient {
 }
 
 /**
- * Build E2B templates at runtime from the same props as `E2B.Template`: a
- * template per repository, per customer image, per agent configuration.
+ * Build E2B templates at runtime from E2B's own build inputs: a template
+ * per repository, per customer image, per agent configuration.
  * E2B builds remotely, so this works from a Worker.
  *
  * Templates built at runtime carry no metadata, so they are not deleted
@@ -121,8 +116,9 @@ export interface TemplatesClient {
  * // in fetch:
  * const template = yield* templates.getOrBuild({
  *   name: `repo-${slug}`,
- *   dockerfile: { content: dockerfileText },
- *   files: [{ path: "package.json", contents: packageJson }],
+ *   image: "node:22-bookworm",
+ *   files: [{ path: "/home/user/app/package.json", contents: packageJson }],
+ *   run: ["cd /home/user/app && npm install"],
  * });
  * const sandbox = yield* sandboxes.create({ templateID: template.templateId });
  * ```

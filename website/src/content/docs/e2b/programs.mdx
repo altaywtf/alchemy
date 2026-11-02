@@ -1,6 +1,6 @@
 ---
 title: Template programs
-description: Run your own Effect program, or a plain Node program, in every sandbox.
+description: Run your own Effect program, or a plain JavaScript program, in every sandbox.
 ---
 
 Give a template a `main`, and every sandbox from it boots with your program already serving HTTP. Alchemy bundles it, copies it into the template, and E2B snapshots the template once the program answers.
@@ -24,7 +24,7 @@ export default class Program extends E2B.Template<Program>()(
 ) {}
 ```
 
-The image defaults to `node:22-bookworm`. Set `image` or `dockerfile` for your own; it needs Node 22 or later.
+The program runs with Bun from `/app`, on `oven/bun:1` by default. Set `image` or `dockerfile` for your own environment; it needs Bun.
 
 ## Call it
 
@@ -58,7 +58,7 @@ Any binding works in a template program, from E2B or another provider.
 Config and binding values are written into the template, so any code in a sandbox from it can read them, including `Redacted` ones. Don't bind credentials that the sandbox's untrusted code must not see; use [egress secrets](/e2b/network-and-secrets) instead.
 :::
 
-## A plain Node program
+## A plain JavaScript program
 
 ```typescript
 // src/Templates.ts

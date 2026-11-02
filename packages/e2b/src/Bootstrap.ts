@@ -1,10 +1,10 @@
 /**
- * Process bootstrap for `E2B.Template` programs (a Node process serving the
- * bundled program inside every sandbox). The generated entry imports this module and the user's
+ * Process bootstrap for `E2B.Template` programs (a Bun process serving the
+ * bundled program). The generated entry imports this module and the user's
  * `main`, nothing else — see `alchemy/Runtime/Bootstrap` for why.
  */
-import { NodeServices } from "@effect/platform-node";
-import { NodeHttpServer } from "alchemy/Http";
+import { BunServices } from "@effect/platform-bun";
+import { BunHttpServer } from "alchemy/Http";
 import { reifyBoundConfigProvider } from "alchemy/Runtime";
 import {
   entrypointLayer,
@@ -20,13 +20,12 @@ import * as Logger from "effect/Logger";
 
 /**
  * Resolve the bundled program (the runners registered via `host.run` /
- * serve) and run it with a Node HTTP server bound to `PORT`, so the
- * returned `{ fetch }` handler is actually served and `host.run` loops
- * stay alive.
+ * serve) and run it with a Bun HTTP server bound to `PORT`, so the returned
+ * `{ fetch }` handler is actually served and `host.run` loops stay alive.
  */
 export const bootstrap = (entrypoint: unknown): Promise<void> => {
   const platform = Layer.mergeAll(
-    NodeServices.layer,
+    BunServices.layer,
     FetchHttpClient.layer,
     Logger.layer([Logger.consolePretty()]),
   );
@@ -35,7 +34,7 @@ export const bootstrap = (entrypoint: unknown): Promise<void> => {
     Effect.provide(
       entrypointLayer(entrypoint).pipe(
         Layer.provideMerge(stackFromEnv),
-        Layer.provideMerge(NodeHttpServer({ hostname: "0.0.0.0" })),
+        Layer.provideMerge(BunHttpServer()),
         Layer.provideMerge(platform),
         Layer.provideMerge(
           Layer.succeed(
@@ -48,5 +47,5 @@ export const bootstrap = (entrypoint: unknown): Promise<void> => {
     Effect.scoped,
   );
 
-  return runProcess("E2B template program", program);
+  return runProcess("Docker service", program);
 };
