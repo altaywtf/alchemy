@@ -20,7 +20,7 @@ export const SeedBase = Effect.gen(function* () {
 });
 
 /** A small public image for run-time sandboxes. */
-export const Agent = Archil.Image("Agent", { source: "alpine:3.20" });
+export const Agent = Archil.Image("Agent", { image: "alpine:3.20" });
 
 /** A deploy-time sandbox the Worker drives with ConnectSandbox. */
 export const Preview = Archil.Sandbox("Preview", {

@@ -8658,6 +8658,9 @@ importers:
 
   packages/archil:
     dependencies:
+      '@alchemy.run/docker':
+        specifier: workspace:*
+        version: link:../docker
       '@distilled.cloud/archil':
         specifier: workspace:*
         version: link:../../submodules/distilled/packages/archil

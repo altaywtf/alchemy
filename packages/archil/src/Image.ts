@@ -1,32 +1,40 @@
+import * as BuildPlan from "@alchemy.run/docker/BuildPlan";
+import type { InlineDockerfile } from "@alchemy.run/docker/Dockerfile";
+import type { DockerfileBuild } from "@alchemy.run/docker/ImageSource";
+import type { ImageRegistry } from "@alchemy.run/docker/Registry";
 import * as archil from "@distilled.cloud/archil";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Redacted from "effect/Redacted";
 import { waitForImage } from "./internal/archil.ts";
 import type { Providers } from "./Providers.ts";
-
-/** Credentials Archil pulls a private image with. */
-export interface ImageRegistryAuth {
-  /** Registry username. */
-  username: string;
-  /** Registry password or access token. */
-  password: Redacted.Redacted<string>;
-}
 
 export interface ImageProps {
   /**
    * Linux OCI image reference with a `linux/amd64` manifest, e.g.
-   * `ghcr.io/acme/agent:1`. Docker shorthand and tags are accepted. Changing
-   * it builds a new image.
+   * `ghcr.io/acme/agent:1`. Docker shorthand and tags are accepted.
+   * Exclusive with `dockerfile` and `context`. Changing it builds a new
+   * image.
    */
-  source: string;
+  image?: string;
   /**
-   * Credentials for a private registry. Archil uses them for this build
-   * only and doesn't store them.
+   * A Dockerfile path (relative to the cwd) or `Dockerfile.inline` content.
+   * Archil has no builder of its own, so a Dockerfile image needs a
+   * registry to push to; until Alchemy can push a build plan, deploying one
+   * fails with {@link ImageRequiresBuild}.
    */
-  registryAuth?: ImageRegistryAuth;
+  dockerfile?: string | InlineDockerfile;
+  /** Build context for a `dockerfile` path. */
+  context?: string;
+  /** Docker build args and BuildKit secrets for a `dockerfile` image. */
+  build?: DockerfileBuild;
+  /**
+   * Credentials for a private registry. Archil uses them to pull this
+   * image only and doesn't store them.
+   */
+  registry?: ImageRegistry;
 }
 
 export interface ImageAttributes {
@@ -40,15 +48,29 @@ export interface ImageAttributes {
   digest: string | undefined;
   /** Whether the image came from a private registry. */
   private: boolean;
+  /** Hash of the build plan the image came from. */
+  hash: string;
 }
 
 export type Image = Resource<"Archil.Image", ImageProps, ImageAttributes, never, Providers>;
 
 /**
- * A sandbox image, built by Archil from an OCI image in a public or private
- * registry. Sandboxes boot the image's current digest. Public images can
- * also be used directly as a sandbox's `baseImage`; build an `Image` for a
- * private one, or to pin the digest every sandbox boots.
+ * The image needs instructions run on top of its base, and Archil only
+ * pulls finished images.
+ */
+export class ImageRequiresBuild extends Data.TaggedError("Archil.ImageRequiresBuild")<{
+  readonly message: string;
+}> {}
+
+/**
+ * A sandbox image. Archil pulls it from a public or private registry and
+ * sandboxes boot its current digest. Public images can also be used
+ * directly as a sandbox's `baseImage`; build an `Image` for a private one,
+ * or to pin the digest every sandbox boots.
+ *
+ * Props follow `@alchemy.run/docker`'s image source, like every Alchemy
+ * image resource. Archil has no builder, so today only `image` references
+ * deploy.
  *
  * Archil has no API to delete an image, so destroying the resource only
  * removes it from Alchemy's state.
@@ -57,14 +79,18 @@ export type Image = Resource<"Archil.Image", ImageProps, ImageAttributes, never,
  * ### Building an Image
  * **Example:** From a public image
  * ```typescript
- * export const Base = Archil.Image("Base", { source: "node:24-bookworm" });
+ * export const Base = Archil.Image("Base", { image: "node:24-bookworm" });
  * ```
  *
  * **Example:** From a private registry
  * ```typescript
  * export const Agent = Archil.Image("Agent", {
- *   source: "ghcr.io/acme/agent:1",
- *   registryAuth: { username: "acme-bot", password: Alchemy.Secret("GHCR_TOKEN") },
+ *   image: "ghcr.io/acme/agent:1",
+ *   registry: {
+ *     server: "ghcr.io",
+ *     username: "acme-bot",
+ *     password: Alchemy.Secret("GHCR_TOKEN"),
+ *   },
  * });
  * ```
  *
@@ -80,24 +106,64 @@ export type Image = Resource<"Archil.Image", ImageProps, ImageAttributes, never,
  */
 export const Image = Resource<Image>("Archil.Image");
 
+/** What Archil's image service can build: nothing beyond pulling a reference. */
+export const capabilities: BuildPlan.Capabilities = {
+  target: "Archil.Image",
+  platforms: ["linux/amd64"],
+};
+
 /** Map an image response to attributes. */
-export const toImageAttributes = (image: archil.Image): ImageAttributes => ({
+export const toImageAttributes = (image: archil.Image, hash: string): ImageAttributes => ({
   imageId: image.image_id,
   source: image.source,
   canonicalSource: image.canonical_source,
   digest: image.digest,
   private: image.private,
+  hash,
 });
 
-/** Build (or rebuild) an image and wait until it is ready. */
-export const buildImage = Effect.fn(function* (props: ImageProps) {
+/** Plan an image source for Archil. */
+export const planImage = (props: ImageProps) =>
+  BuildPlan.plan(
+    props.image !== undefined
+      ? { image: props.image }
+      : { dockerfile: props.dockerfile, context: props.context, build: props.build },
+    { capabilities, registry: props.registry },
+  );
+
+/**
+ * The reference Archil can pull for a plan: its base, when the plan adds
+ * nothing on top of it.
+ */
+export const pullableSource = (plan: BuildPlan.BuildPlan) =>
+  plan.instructions.length === 0 && plan.files.length === 0
+    ? Effect.succeed(plan.base)
+    : Effect.fail(
+        new ImageRequiresBuild({
+          message: `Archil.Image can only pull a finished image; this Dockerfile adds ${plan.instructions.length} instruction(s) on top of ${plan.base}. Build and push it, then pass \`image\`.`,
+        }),
+      );
+
+/** Ask Archil to pull a reference and wait until the image is ready. */
+export const pullImage = Effect.fn(function* (
+  source: string,
+  registry: ImageRegistry | undefined,
+  hash: string,
+) {
   const { data } = yield* archil.createImage({
-    source: props.source,
-    registry_auth: props.registryAuth
-      ? { username: props.registryAuth.username, password: props.registryAuth.password }
+    source,
+    registry_auth: registry
+      ? { username: registry.username, password: registry.password }
       : undefined,
   });
-  return toImageAttributes(yield* waitForImage(data.image_id));
+  return toImageAttributes(yield* waitForImage(data.image_id), hash);
+});
+
+/** Plan, then pull, an image. */
+export const buildImage = Effect.fn(function* (props: ImageProps) {
+  const plan = yield* planImage(props);
+  const source = yield* pullableSource(plan);
+  return yield* pullImage(source, props.registry, plan.hash);
 });
 
 export const ImageProvider = () =>
@@ -105,39 +171,42 @@ export const ImageProvider = () =>
     Image,
     Effect.gen(function* () {
       return {
-        stables: ["imageId", "source"],
+        stables: ["imageId"],
         // No delete or list API: nuke can't remove images.
         nuke: { skip: true },
-        diff: Effect.fn(function* ({ olds, news }) {
-          if (!isResolved(news)) return undefined;
-          if (olds !== undefined && news.source !== olds.source) {
-            return { action: "replace" } as const;
-          }
+        diff: Effect.fn(function* ({ news, output }) {
+          if (!isResolved(news) || output === undefined) return undefined;
+          // The plan hash covers the reference, the Dockerfile and its context.
+          const plan = yield* planImage(news);
+          if (plan.hash !== output.hash) return { action: "replace" } as const;
           return undefined;
         }),
         read: Effect.fn(function* ({ output }) {
           if (!output) return undefined;
           return yield* archil.getImage({ image_id: output.imageId }).pipe(
-            Effect.map(({ data }) => toImageAttributes(data)),
+            Effect.map(({ data }) => toImageAttributes(data, output.hash)),
             Effect.catchTag("ImageNotFound", () => Effect.undefined),
           );
         }),
         reconcile: Effect.fn(function* ({ news, output, session }) {
-          // Observe — a ready image with the same source is kept; anything
+          const plan = yield* planImage(news);
+          for (const warning of plan.warnings) yield* session.note(warning);
+          // Observe — a ready image from the same plan is kept; anything
           // else (missing, failed, interrupted) is requested again.
-          if (output && output.source === news.source) {
+          if (output && output.hash === plan.hash) {
             const observed = yield* archil.getImage({ image_id: output.imageId }).pipe(
               Effect.map(({ data }) => data),
               Effect.catchTag("ImageNotFound", () => Effect.undefined),
             );
-            if (observed?.status === "ready") return toImageAttributes(observed);
+            if (observed?.status === "ready") return toImageAttributes(observed, plan.hash);
             if (observed?.status === "building") {
-              return toImageAttributes(yield* waitForImage(observed.image_id));
+              return toImageAttributes(yield* waitForImage(observed.image_id), plan.hash);
             }
           }
           // Ensure
-          yield* session.note(`Building image ${news.source}...`);
-          return yield* buildImage(news);
+          const source = yield* pullableSource(plan);
+          yield* session.note(`Pulling image ${source}...`);
+          return yield* pullImage(source, news.registry, plan.hash);
         }),
         // Archil has no image delete API.
         delete: () => Effect.void,

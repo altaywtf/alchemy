@@ -1,20 +1,22 @@
+import type { ImageRegistry } from "@alchemy.run/docker/Registry";
 import * as archil from "@distilled.cloud/archil";
 import * as Binding from "alchemy/Binding";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { ApiAccess } from "./ArchilBindings.ts";
-import { buildImage, toImageAttributes, type ImageAttributes, type ImageProps } from "./Image.ts";
+import { pullImage, toImageAttributes, type ImageAttributes } from "./Image.ts";
 import type { ArchilFailed, ArchilNotReady } from "./internal/archil.ts";
 
 export interface CreateImageClient {
   /**
-   * Build an image from an OCI reference and wait until it is ready. Takes
-   * the same props as {@link Image}.
+   * Pull an OCI reference into an Archil image and wait until it is ready.
+   * Takes the same `image` and `registry` props as {@link Image}.
    */
-  build(
-    props: ImageProps,
-  ): Effect.Effect<
+  build(props: {
+    readonly image: string;
+    readonly registry?: ImageRegistry;
+  }): Effect.Effect<
     ImageAttributes,
     archil.CreateImageError | archil.GetImageError | ArchilFailed | ArchilNotReady,
     RuntimeContext
@@ -34,7 +36,7 @@ export interface CreateImageClient {
  * **Example:** An image per tenant
  * ```typescript
  * const images = yield* Archil.CreateImage();
- * const image = yield* images.build({ source: `ghcr.io/acme/${tenant}:latest` });
+ * const image = yield* images.build({ image: `ghcr.io/acme/${tenant}:latest` });
  * const sandbox = yield* sandboxes.create({ name: tenant, image: image.imageId });
  * ```
  *
@@ -57,11 +59,11 @@ export const CreateImageHttp = Layer.effect(
     return Effect.fn(function* () {
       const authorize = yield* access();
       return {
-        build: (props) => authorize(buildImage(props)),
+        build: (props) => authorize(pullImage(props.image, props.registry, props.image)),
         get: (imageId) =>
           authorize(
             archil.getImage({ image_id: imageId }).pipe(
-              Effect.map(({ data }) => toImageAttributes(data)),
+              Effect.map(({ data }) => toImageAttributes(data, data.source)),
               Effect.catchTag("ImageNotFound", () => Effect.undefined),
             ),
           ),

@@ -10,7 +10,7 @@ A sandbox is a microVM with disks mounted and public ports. It pauses when idle 
 Bind an image, then create a sandbox per task:
 
 ```typescript
-export const Agent = Archil.Image("Agent", { source: "node:24-bookworm" });
+export const Agent = Archil.Image("Agent", { image: "node:24-bookworm" });
 
 const sandboxes = yield* Archil.CreateSandbox(Agent);
 const sandbox = yield* sandboxes.create({
@@ -63,8 +63,8 @@ yield* devbox.exec("pnpm build");
 
 ```typescript
 export const Agent = Archil.Image("Agent", {
-  source: "ghcr.io/acme/agent:1",
-  registryAuth: { username: "acme-bot", password: Alchemy.Secret("GHCR_TOKEN") },
+  image: "ghcr.io/acme/agent:1",
+  registry: { server: "ghcr.io", username: "acme-bot", password: Alchemy.Secret("GHCR_TOKEN") },
 });
 ```
 

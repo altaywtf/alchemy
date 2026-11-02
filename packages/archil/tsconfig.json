@@ -24,6 +24,9 @@
     },
     {
       "path": "../aws/tsconfig.json"
+    },
+    {
+      "path": "../docker/tsconfig.json"
     }
   ]
 }

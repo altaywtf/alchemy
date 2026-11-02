@@ -12,7 +12,7 @@ Some work needs a real machine. Boot a sandbox with the user's disk mounted, run
 ```diff lang="typescript"
 export const Template = Archil.Disk("Template", {});
 +
-+export const Agent = Archil.Image("Agent", { source: "node:24-bookworm" });
++export const Agent = Archil.Image("Agent", { image: "node:24-bookworm" });
 ```
 
 ## Bind a sandbox client

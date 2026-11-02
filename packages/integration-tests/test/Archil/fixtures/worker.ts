@@ -119,7 +119,7 @@ export default class ArchilWorker extends Cloudflare.Worker<ArchilWorker>()(
             });
           }
           case "/image": {
-            const image = yield* images.build({ source: "alpine:3.20" });
+            const image = yield* images.build({ image: "alpine:3.20" });
             return yield* HttpServerResponse.json(image);
           }
           case "/sandbox": {

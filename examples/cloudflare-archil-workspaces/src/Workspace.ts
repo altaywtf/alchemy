@@ -15,4 +15,4 @@ export const Seeded = Effect.gen(function* () {
 });
 
 /** The image workspace sandboxes boot. */
-export const Agent = Archil.Image("Agent", { source: "node:24-bookworm" });
+export const Agent = Archil.Image("Agent", { image: "node:24-bookworm" });
