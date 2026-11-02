@@ -18,7 +18,10 @@ export type CreateSandboxOptions = Omit<sandboxes.CreateSandboxRequest, "templat
 };
 
 /** E2B's `listSandboxes` filters, with `metadata` as a record instead of a query string. */
-export type ListSandboxesOptions = Omit<sandboxes.ListSandboxesRequest, "metadata"> & {
+export type ListSandboxesOptions = Omit<
+  sandboxes.ListSandboxesRequest,
+  "metadata" | "nextToken"
+> & {
   readonly metadata?: Readonly<Record<string, string>>;
 };
 

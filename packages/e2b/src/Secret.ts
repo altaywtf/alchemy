@@ -5,6 +5,7 @@ import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
+import * as Stream from "effect/Stream";
 import { E2BUnexpectedResponse } from "./Errors.ts";
 import {
   e2bName,
@@ -201,7 +202,9 @@ export const SecretProvider = () =>
             .pipe(Effect.catchTag("NotFound", () => Effect.void));
         }),
         list: Effect.fn(function* () {
-          const all = yield* secrets.listSecrets({ limit: 100 });
+          const all = Array.from(
+            yield* Stream.runCollect(secrets.listSecrets.items({ limit: 100 })),
+          );
           return all
             .filter((secret) => hasAnyAlchemyMetadata(secret.metadata as Record<string, string>))
             .map(toSecretAttributes);

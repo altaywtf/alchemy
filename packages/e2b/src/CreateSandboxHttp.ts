@@ -4,6 +4,7 @@ import * as Namespace from "alchemy/Namespace";
 import type * as Output from "alchemy/Output";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import {
   CreateSandbox,
   type CreateSandboxBindingOptions,
@@ -117,16 +118,19 @@ export const CreateSandboxHttp = Layer.effect(
         list: Effect.fn("E2B.CreateSandbox.list")(function* (listOptions) {
           const template =
             listOptions?.template ?? (baseId === undefined ? undefined : yield* baseId);
-          return yield* auth.authorize(
-            sandboxes.listSandboxes({
-              ...listOptions,
-              ...(template === undefined ? {} : { template }),
-              metadata:
-                listOptions?.metadata === undefined
-                  ? undefined
-                  : metadataQuery(listOptions.metadata),
-            }),
+          const all = yield* auth.authorize(
+            Stream.runCollect(
+              sandboxes.listSandboxes.items({
+                ...listOptions,
+                ...(template === undefined ? {} : { template }),
+                metadata:
+                  listOptions?.metadata === undefined
+                    ? undefined
+                    : metadataQuery(listOptions.metadata),
+              }),
+            ),
           );
+          return Array.from(all);
         }),
         kill: (sandboxId) =>
           auth.authorize(sandboxes.deleteSandbox({ sandboxID: sandboxId })).pipe(

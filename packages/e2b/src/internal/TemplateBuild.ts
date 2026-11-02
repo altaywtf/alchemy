@@ -207,10 +207,8 @@ export const planTemplateBuild = Effect.fn(function* (spec: TemplateBuildSpec) {
     }
     const [src, dest] = step.args as [string, string];
     const fromMemory = inlineUnder(src);
-    const files =
-      fromMemory.length > 0
-        ? fromMemory
-        : yield* requireFiles(src, yield* resolveSource(context, src));
+    const fromContext = fromMemory.length > 0 ? [] : yield* resolveSource(context, src);
+    const files = fromMemory.length > 0 ? fromMemory : yield* requireFiles(src, fromContext);
     const hash = filesHash(src, dest, files);
     uploads.set(hash, files);
     steps.push({ type: "COPY", args: [...step.args], filesHash: hash });

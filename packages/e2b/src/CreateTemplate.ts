@@ -51,8 +51,8 @@ export interface TemplatesClient {
   ): Effect.Effect<templates.GetTemplateResponse | undefined, E2BError, RuntimeContext>;
   /** The team's templates. */
   list(
-    options?: Omit<templates.ListTemplatesRequest, "teamID">,
-  ): Effect.Effect<templates.ListTemplatesResponse, E2BError, RuntimeContext>;
+    options?: Omit<templates.ListTemplatesRequest, "teamID" | "nextToken">,
+  ): Effect.Effect<ReadonlyArray<templates.Template>, E2BError, RuntimeContext>;
   /** E2B's public base templates. */
   listDefaults(): Effect.Effect<templates.ListDefaultTemplatesResponse, E2BError, RuntimeContext>;
   /** Templates matching a search. */

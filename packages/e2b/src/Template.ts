@@ -12,6 +12,7 @@ import {
 } from "alchemy/Runtime/Process";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
+import * as Stream from "effect/Stream";
 import { e2bName, isGeneratedName } from "./internal/Ownership.ts";
 import {
   APP_DIR,
@@ -386,7 +387,8 @@ export const TemplateProvider = () =>
           // unchanged `context` path still rebuilds.
           // Bindings may be unresolved here; the engine reconciles when they
           // change. Diff compares the hash of everything else.
-          const plan = yield* planTemplateBuild(yield* specOf(name, news, undefined));
+          const unbound = yield* specOf(name, news, undefined);
+          const plan = yield* planTemplateBuild(unbound);
           if (plan.hash !== output.sourceHash || news.force) return { action: "update" } as const;
           if ((news.public ?? false) !== output.public) return { action: "update" } as const;
           return undefined;
@@ -415,10 +417,12 @@ export const TemplateProvider = () =>
           // Observe
           const observed = yield* observeTemplate(output?.templateId, name);
           const plan = yield* planTemplateBuild(spec);
-          const sourceHash =
+          const unbound =
             bindings === undefined || bindings.length === 0
-              ? plan.hash
-              : (yield* planTemplateBuild(yield* specOf(name, news, undefined))).hash;
+              ? undefined
+              : yield* specOf(name, news, undefined);
+          const sourceHash =
+            unbound === undefined ? plan.hash : (yield* planTemplateBuild(unbound)).hash;
 
           // Ensure — build when there is no ready build of these exact inputs.
           let attrs: TemplateAttributes;
@@ -472,7 +476,9 @@ export const TemplateProvider = () =>
             .pipe(Effect.catchTag("NotFound", () => Effect.void));
         }),
         list: Effect.fn(function* () {
-          const all = yield* templates.listTemplates({ limit: 100 });
+          const all = Array.from(
+            yield* Stream.runCollect(templates.listTemplates.items({ limit: 100 })),
+          );
           return all
             .filter((template) => template.aliases.some(isGeneratedName))
             .map((template): TemplateAttributes => ({

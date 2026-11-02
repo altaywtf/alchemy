@@ -2,6 +2,7 @@ import * as snapshots from "@distilled.cloud/e2b/snapshots";
 import * as templates from "@distilled.cloud/e2b/templates";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import { CreateSnapshot, type SnapshotsClient } from "./CreateSnapshot.ts";
 import { bindE2B } from "./internal/Bindings.ts";
 import { takeSnapshot } from "./internal/SnapshotBuild.ts";
@@ -28,7 +29,10 @@ export const CreateSnapshotHttp = Layer.succeed(
     const auth = yield* bindE2B;
     const client: SnapshotsClient = {
       create: (name, setup) => auth.authorize(takeSnapshot(name, setup)),
-      list: (options) => auth.authorize(snapshots.listSnapshots({ ...options })),
+      list: (options) =>
+        auth
+          .authorize(Stream.runCollect(snapshots.listSnapshots.items({ ...options })))
+          .pipe(Effect.map((all) => Array.from(all))),
       // A snapshot is stored as a template under its name.
       delete: (name) =>
         auth

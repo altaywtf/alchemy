@@ -22,8 +22,8 @@ export interface SnapshotsClient {
   ): Effect.Effect<sandboxes.SnapshotInfo, E2BError | SnapshotSetupFailed, RuntimeContext>;
   /** Snapshots, filtered by source sandbox or name. */
   list(
-    options?: snapshots.ListSnapshotsRequest,
-  ): Effect.Effect<snapshots.ListSnapshotsResponse, E2BError, RuntimeContext>;
+    options?: Omit<snapshots.ListSnapshotsRequest, "nextToken">,
+  ): Effect.Effect<ReadonlyArray<snapshots.SnapshotInfo>, E2BError, RuntimeContext>;
   /** Deletes a snapshot (and every version of it). Deleting one that is gone succeeds. */
   delete(name: string): Effect.Effect<void, E2BError, RuntimeContext>;
 }

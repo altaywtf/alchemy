@@ -3,6 +3,7 @@ import * as secrets from "@distilled.cloud/e2b/secrets";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import type { Providers } from "./Providers.ts";
 
 /** What a host creates at runtime that its sweep cleans up. */
@@ -66,11 +67,15 @@ export const SweepProvider = () =>
         delete: Effect.fn(function* ({ output, session }) {
           if (output.onDestroy === "retain" || Object.keys(output.stamp).length === 0) return;
           if (output.kinds.includes("sandboxes")) {
-            const running = yield* sandboxes.listSandboxes({
-              metadata: metadataQuery(output.stamp),
-              state: ["running", "paused"],
-              limit: 100,
-            });
+            const running = Array.from(
+              yield* Stream.runCollect(
+                sandboxes.listSandboxes.items({
+                  metadata: metadataQuery(output.stamp),
+                  state: ["running", "paused"],
+                  limit: 100,
+                }),
+              ),
+            );
             const owned = running.filter((sandbox) => matches(output.stamp, sandbox.metadata));
             if (owned.length > 0) yield* session.note(`Killing ${owned.length} sandbox(es)...`);
             yield* Effect.forEach(
@@ -83,7 +88,9 @@ export const SweepProvider = () =>
             );
           }
           if (output.kinds.includes("secrets")) {
-            const all = yield* secrets.listSecrets({ limit: 100 });
+            const all = Array.from(
+              yield* Stream.runCollect(secrets.listSecrets.items({ limit: 100 })),
+            );
             const owned = all.filter((secret) => matches(output.stamp, secret.metadata));
             if (owned.length > 0) yield* session.note(`Deleting ${owned.length} secret(s)...`);
             yield* Effect.forEach(

@@ -55,7 +55,8 @@ The sandbox has no internet access and is killed when the request ends. `command
 +        const request = yield* HttpServerRequest;
 +        const url = new URL(request.url, "http://api");
 +        if (request.method === "POST" && url.pathname === "/run") {
-+          const result = yield* run(yield* request.text).pipe(Effect.scoped);
++          const code = yield* request.text;
++          const result = yield* run(code).pipe(Effect.scoped);
 +          return yield* HttpServerResponse.json(result);
 +        }
         return HttpServerResponse.text("ok");

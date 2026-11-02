@@ -27,11 +27,12 @@ test.provider(
       expect(Redacted.value(key.key)).toMatch(/^e2b_/);
       expect(yield* keyExists(key.apiKeyId)).toBe(true);
 
-      // The minted key authenticates control-plane calls on its own.
+      // The new key authenticates control-plane calls on its own: a wrong key
+      // fails this call with Unauthorized.
       const listed = yield* sandboxes
         .listSandboxes({})
         .pipe(Effect.provide(E2B.credentials({ apiKey: key.key })));
-      expect(Array.isArray(listed)).toBe(true);
+      expect(Array.isArray(listed.items)).toBe(true);
 
       const renamed = yield* stack.deploy(
         Effect.gen(function* () {

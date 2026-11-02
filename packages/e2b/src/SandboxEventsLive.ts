@@ -71,15 +71,16 @@ const handleDelivery = <Req>(
 ): Effect.Effect<Response, never, Req> =>
   Effect.gen(function* () {
     if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
-    const body = yield* Effect.promise(() => request.text());
+    const body = yield* Effect.tryPromise(() => request.text()).pipe(Effect.option);
+    if (body._tag === "None") return new Response("unreadable body", { status: 400 });
     const resolved = yield* secret;
     const valid = yield* verifySignature(
       resolved === undefined ? undefined : Redacted.value(resolved),
-      body,
+      body.value,
       request.headers.get("e2b-signature") ?? undefined,
     );
     if (!valid) return new Response("invalid signature", { status: 401 });
-    const event = yield* Effect.try(() => JSON.parse(body) as SandboxEvent).pipe(
+    const event = yield* Effect.try(() => JSON.parse(body.value) as SandboxEvent).pipe(
       Effect.orElseSucceed(() => undefined),
     );
     if (event === undefined) return new Response("invalid payload", { status: 400 });
@@ -98,11 +99,12 @@ const verifySignature = (
 ): Effect.Effect<boolean> =>
   Effect.gen(function* () {
     if (!secret || !signature) return false;
-    const digest = yield* Effect.promise(() =>
+    const digest = yield* Effect.tryPromise(() =>
       crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret + body)),
-    );
+    ).pipe(Effect.option);
+    if (digest._tag === "None") return false;
     let binary = "";
-    for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+    for (const byte of new Uint8Array(digest.value)) binary += String.fromCharCode(byte);
     const expected = btoa(binary).replace(/=+$/, "");
     return timingSafeEqual(expected, signature);
   });

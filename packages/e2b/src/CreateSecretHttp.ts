@@ -1,6 +1,7 @@
 import * as secrets from "@distilled.cloud/e2b/secrets";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import { declareSweep } from "./CreateSandboxHttp.ts";
 import {
   CreateSecret,
@@ -77,8 +78,10 @@ export const CreateSecretHttp = Layer.effect(
           ),
         list: Effect.fn("E2B.CreateSecret.list")(function* () {
           const stamp = yield* auth.stamp;
-          const all = yield* auth.authorize(secrets.listSecrets({ limit: 100 }));
-          return all
+          const all = yield* auth.authorize(
+            Stream.runCollect(secrets.listSecrets.items({ limit: 100 })),
+          );
+          return Array.from(all)
             .filter((secret) =>
               Object.entries(stamp).every(([key, value]) => secret.metadata[key] === value),
             )

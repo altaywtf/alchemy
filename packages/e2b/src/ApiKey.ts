@@ -91,11 +91,15 @@ export const ApiKeyProvider = () =>
         reconcile: Effect.fn(function* ({ id, news, output, session }) {
           const name = news.name ?? output?.name ?? (yield* e2bName(id, undefined));
 
-          // Observe — only a key whose value we hold is usable.
-          const observed = output !== undefined ? yield* findById(output.apiKeyId) : undefined;
+          // Observe — E2B shows a key's value only at creation, so the only
+          // usable key is one whose value is in state.
+          const held =
+            output === undefined
+              ? undefined
+              : { stored: output, observed: yield* findById(output.apiKeyId) };
 
           // Ensure
-          if (observed === undefined || output === undefined) {
+          if (held?.observed === undefined) {
             yield* session.note(`Creating API key ${name}...`);
             const created = yield* apiKeys.createApiKey({ name });
             return {
@@ -106,6 +110,8 @@ export const ApiKeyProvider = () =>
             };
           }
 
+          const { stored, observed } = held;
+
           // Sync — the name is the only mutable aspect.
           if (observed.name !== name) {
             yield* apiKeys.updateApiKey({ apiKeyID: observed.id, name });
@@ -115,9 +121,9 @@ export const ApiKeyProvider = () =>
                 message: `E2B API key ${name} vanished after rename`,
               });
             }
-            return { ...output, name: renamed.name, mask: maskOf(renamed.mask) };
+            return { ...stored, name: renamed.name, mask: maskOf(renamed.mask) };
           }
-          return { ...output, name: observed.name, mask: maskOf(observed.mask) };
+          return { ...stored, name: observed.name, mask: maskOf(observed.mask) };
         }),
         delete: Effect.fn(function* ({ output }) {
           yield* apiKeys

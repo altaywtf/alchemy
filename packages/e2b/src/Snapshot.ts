@@ -6,6 +6,7 @@ import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import { e2bName, isGeneratedName } from "./internal/Ownership.ts";
 import { takeSnapshot } from "./internal/SnapshotBuild.ts";
 import type { Providers } from "./Providers.ts";
@@ -184,7 +185,9 @@ export const SnapshotProvider = () =>
             .pipe(Effect.catchTag("NotFound", () => Effect.void));
         }),
         list: Effect.fn(function* () {
-          const all = yield* templates.listTemplates({ limit: 100 });
+          const all = Array.from(
+            yield* Stream.runCollect(templates.listTemplates.items({ limit: 100 })),
+          );
           return all
             .filter((template) => template.aliases.some(isGeneratedName))
             .map((template): SnapshotAttributes => ({

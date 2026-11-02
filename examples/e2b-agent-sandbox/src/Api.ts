@@ -47,7 +47,8 @@ export default class Api extends Cloudflare.Worker<Api>()(
         const url = new URL(request.url, "http://api");
 
         if (request.method === "POST" && url.pathname === "/run") {
-          const result = yield* run(yield* request.text).pipe(Effect.scoped);
+          const code = yield* request.text;
+          const result = yield* run(code).pipe(Effect.scoped);
           return yield* HttpServerResponse.json(result);
         }
 
@@ -65,7 +66,8 @@ export default class Api extends Cloudflare.Worker<Api>()(
           const [, user, file] = match as unknown as [string, string, string];
           const sandbox = yield* userSandbox(user);
           if (request.method === "PUT") {
-            yield* sandbox.files.write(`/home/user/work/${file}`, yield* request.text);
+            const content = yield* request.text;
+            yield* sandbox.files.write(`/home/user/work/${file}`, content);
           }
           const listing = yield* sandbox.commands.run("ls -1 /home/user/work");
           const content = yield* sandbox.files.readText(`/home/user/work/${file}`);

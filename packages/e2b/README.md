@@ -30,8 +30,10 @@ export default class Api extends Cloudflare.Worker<Api>()(
           sandboxes.create({ timeout: 120, network: { allowOut: [] } }),
           (sandbox) => Effect.ignore(sandbox.kill()),
         );
-        yield* sandbox.files.write("main.mjs", yield* request.text);
-        return yield* HttpServerResponse.json(yield* sandbox.commands.run("node main.mjs"));
+        const code = yield* request.text;
+        yield* sandbox.files.write("main.mjs", code);
+        const result = yield* sandbox.commands.run("node main.mjs");
+        return yield* HttpServerResponse.json(result);
       }).pipe(Effect.scoped, Effect.orDie),
     };
   }).pipe(Effect.provide(E2B.CreateSandboxHttp)),

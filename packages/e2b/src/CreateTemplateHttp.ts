@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 import {
   CreateTemplate,
   type RuntimeTemplateSpec,
@@ -100,7 +101,10 @@ export const CreateTemplateHttp = Layer.succeed(
         return yield* build(spec);
       }),
       get,
-      list: (options) => auth.authorize(templates.listTemplates({ ...options })),
+      list: (options) =>
+        auth
+          .authorize(Stream.runCollect(templates.listTemplates.items({ ...options })))
+          .pipe(Effect.map((all) => Array.from(all))),
       listDefaults: () => auth.authorize(templates.listDefaultTemplates({})),
       search: (options) => auth.authorize(unstable.searchTemplates(options)),
       setPublic: (templateId, isPublic) =>
