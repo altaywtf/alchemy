@@ -14,11 +14,21 @@ import * as Schedule from "effect/Schedule";
 export const diskName = (id: string, name: string | undefined) =>
   name ? Effect.succeed(name) : createPhysicalName({ id, maxLength: 100, delimiter: "-" });
 
+/** Lowercase letters, digits and single `-`, trimmed of leading/trailing `-`. */
+export const toDnsLabel = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
 /** Sandbox names: lowercase letters, digits and `-`, at most 63 characters. */
 export const sandboxName = (id: string, name: string | undefined) =>
   name
     ? Effect.succeed(name)
-    : createPhysicalName({ id, maxLength: 63, delimiter: "-", lowercase: true });
+    : createPhysicalName({ id, maxLength: 63, delimiter: "-", lowercase: true }).pipe(
+        Effect.map(toDnsLabel),
+      );
 
 /** API token names. */
 export const tokenName = (id: string, name: string | undefined) =>

@@ -5,7 +5,7 @@ import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import { deleteDisk } from "./Disk.ts";
-import { listSandboxes } from "./internal/archil.ts";
+import { listSandboxes, toDnsLabel } from "./internal/archil.ts";
 import type { Providers } from "./Providers.ts";
 import { deleteSandbox } from "./Sandbox.ts";
 
@@ -91,13 +91,15 @@ export const RuntimeObjectsProvider = () =>
         reconcile: Effect.fn(function* ({ id, news, output }) {
           const prefix =
             output?.prefix ??
-            (yield* createPhysicalName({
-              id,
-              maxLength: 30,
-              suffixLength: 8,
-              delimiter: "-",
-              lowercase: true,
-            }));
+            toDnsLabel(
+              yield* createPhysicalName({
+                id,
+                maxLength: 30,
+                suffixLength: 8,
+                delimiter: "-",
+                lowercase: true,
+              }),
+            );
           return { prefix, kinds: news.kinds, onDestroy: news.onDestroy ?? "delete" };
         }),
         delete: Effect.fn(function* ({ output }) {

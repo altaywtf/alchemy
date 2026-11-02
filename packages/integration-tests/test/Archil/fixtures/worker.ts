@@ -1,0 +1,149 @@
+import * as Archil from "@alchemy.run/archil";
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import { HttpServerRequest } from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
+import * as Stream from "effect/Stream";
+import { MountObject } from "./mount-object.ts";
+import { Agent, Dataset, Preview, Seed, SEED_CHECKPOINT } from "./resources.ts";
+
+const ArchilBindings = Layer.mergeAll(
+  Archil.ExecDiskHttp,
+  Archil.ExecDisksHttp,
+  Archil.ReadDiskHttp,
+  Archil.WriteDiskHttp,
+  Archil.ReadWriteDiskHttp,
+  Archil.BranchDiskHttp,
+  Archil.CreateDiskHttp,
+  Archil.CreateImageHttp,
+  Archil.CreateSandboxHttp,
+  Archil.ConnectSandboxHttp,
+);
+
+const reportFailure = Effect.catchCause((cause: Cause.Cause<unknown>) =>
+  Effect.succeed(HttpServerResponse.text(Cause.pretty(cause), { status: 500 })),
+);
+
+export default class ArchilWorker extends Cloudflare.Worker<ArchilWorker>()(
+  "ArchilWorker",
+  { main: import.meta.url },
+  Effect.gen(function* () {
+    const exec = yield* Archil.ExecDisk(Dataset);
+    const execMany = yield* Archil.ExecDisks();
+    const read = yield* Archil.ReadDisk(Dataset);
+    const write = yield* Archil.WriteDisk(Dataset);
+    const files = yield* Archil.ReadWriteDisk(Dataset);
+    const seeds = yield* Archil.BranchDisk(Seed);
+    const disks = yield* Archil.CreateDisk();
+    const images = yield* Archil.CreateImage();
+    const sandboxes = yield* Archil.CreateSandbox(Agent);
+    const preview = yield* Archil.ConnectSandbox(Preview);
+    const mounts = yield* MountObject;
+
+    return {
+      fetch: Effect.gen(function* () {
+        const request = yield* HttpServerRequest;
+        const url = new URL(request.url, "http://worker");
+        const q = (name: string) => url.searchParams.get(name) ?? "";
+
+        switch (url.pathname) {
+          case "/exec":
+            return yield* HttpServerResponse.json(yield* exec.exec(q("command")));
+          case "/grep":
+            return yield* HttpServerResponse.json(
+              yield* exec.grep({ pattern: q("pattern"), directory: "/", recursive: true }),
+            );
+          case "/exec-many": {
+            const source = yield* disks.create(`${q("user")}-src`);
+            const home = yield* disks.create(q("user"));
+            yield* source.put("hello.txt", "copied");
+            return yield* HttpServerResponse.json(
+              yield* execMany.exec({
+                disks: { src: { disk: source.diskId, readOnly: true }, home: home.diskId },
+                command:
+                  "cp /mnt/archil/src/hello.txt /mnt/archil/home/ && cat /mnt/archil/home/hello.txt",
+              }),
+            );
+          }
+          case "/put":
+            yield* write.put(q("key"), yield* request.text);
+            return yield* HttpServerResponse.json({ ok: true });
+          case "/get":
+            return HttpServerResponse.text(yield* read.getText(q("key")));
+          case "/list":
+            return yield* HttpServerResponse.json(
+              yield* read.list("", { recursive: true }).pipe(
+                Stream.map((o) => o.key),
+                Stream.runCollect,
+              ),
+            );
+          case "/share":
+            return yield* HttpServerResponse.json({
+              url: Redacted.value(yield* read.share(q("key"), 600)),
+            });
+          case "/roundtrip": {
+            yield* files.append(q("key"), "a");
+            yield* files.append(q("key"), "b");
+            const text = yield* files.getText(q("key"));
+            yield* files.delete(q("key"));
+            return yield* HttpServerResponse.json({
+              text,
+              after: yield* files.head(q("key")) ?? null,
+            });
+          }
+          case "/branch": {
+            const branch = yield* seeds.branch({
+              name: q("name"),
+              fromCheckpoint: SEED_CHECKPOINT,
+            });
+            const all = (yield* seeds.listBranches()).map((b) => b.name);
+            return yield* HttpServerResponse.json({ branch, all });
+          }
+          case "/disk": {
+            const disk = yield* disks.create(q("name"));
+            yield* disk.put("whoami.txt", q("name"));
+            const result = yield* disk.exec("cat /mnt/archil/whoami.txt");
+            const listed = (yield* disks.list()).map((d) => d.name);
+            if (q("delete") === "1") yield* disks.delete(q("name"));
+            const gone = (yield* disks.get(q("name"))) === undefined;
+            return yield* HttpServerResponse.json({
+              stdout: result.stdout,
+              listed,
+              name: disk.name,
+              gone,
+            });
+          }
+          case "/image": {
+            const image = yield* images.build({ source: "alpine:3.20" });
+            return yield* HttpServerResponse.json(image);
+          }
+          case "/sandbox": {
+            const sandbox = yield* sandboxes.create({ name: q("name") });
+            yield* sandbox.writeFile("/tmp/note.txt", "hi from worker");
+            const out = yield* sandbox.exec("cat /tmp/note.txt");
+            const forked = yield* sandbox.fork({ name: `${q("name")}-fork` });
+            const forkOut = yield* forked.exec("cat /tmp/note.txt");
+            yield* forked.delete();
+            yield* sandbox.delete();
+            return yield* HttpServerResponse.json({ stdout: out.stdout, fork: forkOut.stdout });
+          }
+          case "/preview": {
+            const out = yield* preview.exec("echo -n preview-ok");
+            const port = yield* preview.exposePort(8080);
+            yield* preview.unexposePort(8080);
+            return yield* HttpServerResponse.json({ stdout: out.stdout, hostname: port.hostname });
+          }
+          case "/mount": {
+            const result = yield* mounts.getByName("default").read(q("key"));
+            return HttpServerResponse.text(result.body, { status: result.status });
+          }
+          default:
+            return HttpServerResponse.text("not found", { status: 404 });
+        }
+      }).pipe(reportFailure),
+    };
+  }).pipe(Effect.provide(ArchilBindings)),
+) {}

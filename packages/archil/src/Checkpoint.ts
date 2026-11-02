@@ -61,12 +61,16 @@ export type Checkpoint = Resource<
  * **Example:** Clone and install once, branch per session
  * ```typescript
  * export const Seed = Archil.Disk("Seed", {});
- * export const Base = Archil.Checkpoint("Base", {
- *   disk: Seed.diskId,
- *   run: [
- *     "git clone --depth 1 https://github.com/alchemy-run/alchemy repo",
- *     "cd repo && corepack enable && pnpm install --frozen-lockfile",
- *   ],
+ * export const Base = Effect.gen(function* () {
+ *   const seed = yield* Seed;
+ *   return yield* Archil.Checkpoint("Base", {
+ *     disk: seed.diskId,
+ *     name: "base",
+ *     run: [
+ *       "git clone --depth 1 https://github.com/alchemy-run/alchemy repo",
+ *       "cd repo && corepack enable && pnpm install --frozen-lockfile",
+ *     ],
+ *   });
  * });
  * ```
  *

@@ -111,13 +111,16 @@ export type Sandbox = Resource<"Archil.Sandbox", SandboxProps, SandboxAttributes
  * ### Creating a Sandbox
  * **Example:** A dev box with a disk mounted
  * ```typescript
- * export const DevBox = Archil.Sandbox("DevBox", {
- *   baseImage: "node:24-bookworm",
- *   vcpuCount: 2,
- *   memSizeMiB: 4096,
- *   mounts: [{ disk: Workspace.diskId, path: "/workspace" }],
- *   ports: [3000],
- *   idleTtlSeconds: 600,
+ * export const DevBox = Effect.gen(function* () {
+ *   const workspace = yield* Workspace;
+ *   return yield* Archil.Sandbox("DevBox", {
+ *     baseImage: "node:24-bookworm",
+ *     vcpuCount: 2,
+ *     memSizeMiB: 4096,
+ *     mounts: [{ disk: workspace.diskId, path: "/workspace" }],
+ *     ports: [3000],
+ *     idleTtlSeconds: 600,
+ *   });
  * });
  * ```
  *

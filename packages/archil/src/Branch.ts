@@ -58,9 +58,13 @@ export type Branch = Resource<"Archil.Branch", BranchProps, BranchAttributes, ne
  * ### Creating a Branch
  * **Example:** A staging copy of a seeded disk
  * ```typescript
- * export const Staging = Archil.Branch("Staging", {
- *   disk: Seed.diskId,
- *   fromCheckpoint: Base.name,
+ * export const Staging = Effect.gen(function* () {
+ *   const seed = yield* Seed;
+ *   const base = yield* Base;
+ *   return yield* Archil.Branch("Staging", {
+ *     disk: seed.diskId,
+ *     fromCheckpoint: base.name,
+ *   });
  * });
  * ```
  *
