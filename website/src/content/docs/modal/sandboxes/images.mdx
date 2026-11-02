@@ -44,7 +44,7 @@ export const Python = Effect.gen(function* () {
 });
 ```
 
-Modal's builder isn't Docker. `USER`, `EXPOSE`, `HEALTHCHECK`, `LABEL`, `ONBUILD`, `STOPSIGNAL` and `VOLUME` fail at plan, naming the line.
+Modal's builder isn't Docker. Multi-stage builds, BuildKit mounts, `EXPOSE`, `HEALTHCHECK`, `LABEL`, `ONBUILD`, `STOPSIGNAL` and `VOLUME` fail at plan, naming the line. `USER` is ignored: containers run as root.
 
 A Dockerfile path works too: `dockerfile: "./sandbox/Dockerfile"`. Files its `COPY` lines read are uploaded from the Dockerfile's directory, or from `context`.
 

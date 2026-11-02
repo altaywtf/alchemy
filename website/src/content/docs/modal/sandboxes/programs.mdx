@@ -45,7 +45,7 @@ const models = yield* Modal.ReadVolume(Models);
 
 The program's env, including the token its bindings need, is stored in a Modal Secret attached to every sandbox. It never goes into the image.
 
-## A plain Node program
+## A plain program
 
 ```typescript
 // src/Agent.ts
@@ -70,4 +70,4 @@ const env = process.env as unknown as AgentEnv;
 createServer((_request, response) => response.end(env.GREETING)).listen(Number(process.env.PORT));
 ```
 
-Listen on `PORT` (8080 unless you set `port`).
+It runs on Bun. Listen on `PORT` (8080 unless you set `port`).

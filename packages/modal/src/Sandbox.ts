@@ -1,7 +1,7 @@
+import * as BuildPlan from "@alchemy.run/docker/BuildPlan";
 import * as image from "@distilled.cloud/modal/image";
 import * as secret from "@distilled.cloud/modal/secret";
-import * as Bundle from "alchemy/Bundle/Bundle";
-import { findCwdForBundle, resolveMainPath } from "alchemy/Bundle/TempRoot";
+import type * as Bundle from "alchemy/Bundle/Bundle";
 import { isResolved } from "alchemy/Diff";
 import { Platform, type Main, type PlatformProps } from "alchemy/Platform";
 import * as Provider from "alchemy/Provider";
@@ -16,14 +16,13 @@ import { sha256Object } from "alchemy/Util/sha256";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import type { App } from "./App.ts";
-import { buildImage, lowerImageEnvironment } from "./ImageBuild.ts";
+import { buildImage } from "./ImageBuild.ts";
+import { checkCommands, lowerPlan, MODAL_CAPABILITIES } from "./ImagePlan.ts";
 import { envNameOf, objectName } from "./internal.ts";
 import type { Providers } from "./Providers.ts";
 import { putSecret } from "./Secret.ts";
 
 const DEFAULT_PORT = 8080;
-const DEFAULT_BASE = "node:22-bookworm-slim";
-const APP_DIR = "/app";
 
 type Ref<T> = T | Effect.Effect<T, never, Providers>;
 
@@ -36,8 +35,8 @@ export interface SandboxProps extends PlatformProps {
   /** The App sandboxes run in. */
   app: Ref<App>;
   /**
-   * Base image the bundle runs on. It needs Node 22 or newer.
-   * @default "node:22-bookworm-slim"
+   * Base image the bundle runs on. It needs Bun on the `PATH`.
+   * @default "oven/bun:1"
    */
   image?: string;
   /** Dockerfile lines run on the base before the bundle is added. */
@@ -128,7 +127,7 @@ export type SandboxRuntimeContext = HostRuntimeContext;
  * ```
  *
  * ### Async program
- * **Example:** A plain Node server, no Effect
+ * **Example:** A plain HTTP server, no Effect (it runs on Bun)
  * ```typescript
  * // src/Agent.ts
  * import * as Modal from "@alchemy.run/modal";
@@ -214,7 +213,7 @@ export type SandboxRuntimeContext = HostRuntimeContext;
  *     main: import.meta.url,
  *     app: Coder,
  *     image: "nvidia/cuda:12.4.1-runtime-ubuntu22.04",
- *     commands: ["RUN apt-get update && apt-get install -y nodejs"],
+ *     commands: ["RUN apt-get update && apt-get install -y curl unzip && curl -fsSL https://bun.sh/install | bash && ln -s /root/.bun/bin/bun /usr/local/bin/bun"],
  *     port: 3000,
  *   },
  *   program,
@@ -267,66 +266,27 @@ export const SandboxProvider = () =>
     Sandbox,
     Effect.gen(function* () {
       const stack = yield* Stack;
-      const virtualEntryPlugin = yield* Bundle.virtualEntryPlugin;
 
-      /** Bundle `main` and lower it, with the base, to an image build spec. */
-      const prepare = Effect.fn(function* (news: SandboxProps) {
-        const realMain = yield* resolveMainPath(news.main);
-        const cwd = yield* findCwdForBundle(realMain);
-        const output = yield* Bundle.build(
+      /** Plan the program's image (bundle + bootstrap) with the shared BuildPlan. */
+      const prepare = Effect.fn(function* (news: SandboxProps, port: number) {
+        const plan = yield* BuildPlan.plan(
           {
-            ...news.build?.input,
-            input: realMain,
-            cwd,
-            platform: "node",
-            external: (id) => id === "bun" || id.startsWith("bun:"),
-            resolve: {
-              conditionNames: [...Bundle.NODE_CONDITION_NAMES],
-              ...news.build?.input?.resolve,
-            },
-            // An async program (`main` without an Effect) runs as-is; an
-            // Effect program runs under the Modal bootstrap.
-            plugins: news.isExternal
-              ? [news.build?.input?.plugins]
-              : [
-                  news.build?.input?.plugins,
-                  virtualEntryPlugin(bootstrapEntry(news.handler ?? "default")),
-                ],
+            main: news.main,
+            image: news.image,
+            handler: news.handler,
+            build: news.build,
           },
           {
-            ...news.build?.output,
-            format: "esm",
-            sourcemap: news.build?.output?.sourcemap ?? false,
-            entryFileNames: "index.mjs",
-            strictExecutionOrder: true,
-            keepNames: true,
+            capabilities: { ...MODAL_CAPABILITIES, target: "Modal.Sandbox" },
+            port,
+            bootstrap: news.isExternal ? undefined : bootstrapEntry(news.handler ?? "default"),
           },
-          news.build,
         );
-        const base = yield* lowerImageEnvironment({
-          image: news.image ?? DEFAULT_BASE,
-          commands: news.commands,
-        });
-        const contextFiles = yield* Effect.sync(() =>
-          output.files.map((file) => ({
-            filename: `app/${file.path}`,
-            data:
-              typeof file.content === "string"
-                ? new TextEncoder().encode(file.content)
-                : file.content,
-          })),
-        );
-        const spec = {
-          ...base,
-          commands: [...base.commands, `COPY app ${APP_DIR}`, `WORKDIR ${APP_DIR}`],
-          contextFiles,
-        };
-        const hash = yield* sha256Object({
-          bundle: output.hash,
-          base: news.image ?? DEFAULT_BASE,
-          commands: news.commands ?? [],
-        });
-        return { spec, hash };
+        const extra = yield* checkCommands(news.commands ?? []);
+        const spec = yield* lowerPlan(plan, extra);
+        const hash = yield* sha256Object({ plan: plan.hash, extra });
+        const command = BuildPlan.startCommand(plan) ?? [];
+        return { spec, hash, command: [...command] };
       });
 
       return {
@@ -334,7 +294,7 @@ export const SandboxProvider = () =>
         diff: Effect.fn(function* ({ news, output }) {
           if (!isResolved(news) || output === undefined) return undefined;
           if (appOf(news.app).appId !== output.appId) return { action: "replace" } as const;
-          const { hash } = yield* prepare(news);
+          const { hash } = yield* prepare(news, news.port ?? DEFAULT_PORT);
           return hash !== output.hash ? ({ action: "update" } as const) : undefined;
         }),
         read: Effect.fn(function* ({ output }) {
@@ -362,7 +322,7 @@ export const SandboxProvider = () =>
           const stored = yield* putSecret(secretName, app.environment, env);
 
           // Ensure the image: Modal reuses a cached build for the same inputs.
-          const { spec, hash } = yield* prepare(news);
+          const { spec, hash, command } = yield* prepare(news, port);
           const imageId =
             output !== undefined && output.hash === hash && output.appId === app.appId
               ? output.imageId
@@ -376,7 +336,7 @@ export const SandboxProvider = () =>
             secretId: stored.secretId,
             secretName,
             port,
-            command: ["node", `${APP_DIR}/index.mjs`],
+            command,
             hash,
           };
         }),

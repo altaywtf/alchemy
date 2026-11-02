@@ -73,7 +73,7 @@ test.provider(
               app,
               dockerfile: Dockerfile.inline`
                 FROM debian:bookworm-slim
-                USER nobody
+                HEALTHCHECK CMD true
               `,
             });
           }),
@@ -81,7 +81,7 @@ test.provider(
         .pipe(Effect.result);
       expect(Result.isFailure(result)).toBe(true);
       expect(String(Result.isFailure(result) ? JSON.stringify(result.failure) : "")).toContain(
-        "USER",
+        "HEALTHCHECK",
       );
       yield* stack.destroy();
     }),

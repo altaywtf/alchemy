@@ -1,44 +1,59 @@
+import * as BuildPlan from "@alchemy.run/docker/BuildPlan";
 import { decodeCbor, encodeCbor } from "@alchemy.run/modal/Cbor";
-import { parseDockerfile, validateDockerfile } from "@alchemy.run/modal/ImageBuild";
-import { describe, expect, it } from "@alchemy.run/test";
+import { checkCommands, MODAL_CAPABILITIES } from "@alchemy.run/modal/ImagePlan";
+import { describe, expect, it, layer } from "@alchemy.run/test";
+import { BunServices } from "@effect/platform-bun";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 
-describe("Modal Dockerfile lowering", () => {
-  it.effect("joins continuation lines and drops comments", () =>
-    Effect.sync(() => {
-      const instructions = parseDockerfile(
-        ["# base", "FROM node:22", "RUN apt-get update && \\", "  apt-get install -y git", ""].join(
-          "\n",
-        ),
+const plan = (content: string) =>
+  BuildPlan.plan({ dockerfile: { content } }, { capabilities: MODAL_CAPABILITIES });
+
+layer(BunServices.layer)("Modal build capabilities", (it) => {
+  it.effect("plans a Dockerfile Modal's builder runs", () =>
+    Effect.gen(function* () {
+      const result = yield* plan(
+        "FROM python:3.12\nENV A=1\nWORKDIR /app\nRUN pip install pandas\n",
       );
-      expect(instructions.map((i) => i.keyword)).toEqual(["FROM", "RUN"]);
-      expect(instructions[1]!.args).toBe("apt-get update &&  apt-get install -y git");
-      expect(instructions[1]!.line).toBe(3);
+      expect(BuildPlan.renderLines(result)[0]).toBe("FROM python:3.12");
+      expect(result.warnings).toEqual([]);
     }),
   );
 
-  it.effect("rejects instructions Modal's builder doesn't run, naming the line", () =>
+  it.effect("warns that USER is ignored", () =>
     Effect.gen(function* () {
-      const result = yield* validateDockerfile(
-        parseDockerfile("FROM debian\nRUN true\nHEALTHCHECK CMD true"),
-      ).pipe(Effect.result);
+      const result = yield* plan("FROM debian\nUSER nobody\n");
+      expect(result.warnings.length).toBe(1);
+      expect(result.warnings[0]).toContain("USER");
+    }),
+  );
+
+  it.effect("rejects an instruction Modal can't run, naming the line", () =>
+    Effect.gen(function* () {
+      const result = yield* plan("FROM debian\nRUN true\nHEALTHCHECK CMD true\n").pipe(
+        Effect.result,
+      );
       expect(Result.isFailure(result)).toBe(true);
-      if (Result.isFailure(result)) {
-        expect(result.failure.instruction).toBe("HEALTHCHECK");
-        expect(result.failure.line).toBe(3);
+      if (Result.isFailure(result) && result.failure._tag === "UnsupportedDockerfile") {
+        expect(result.failure.violations.map((v) => v.line)).toEqual([3]);
       }
     }),
   );
 
-  it.effect("accepts a Dockerfile Modal can build", () =>
+  it.effect("rejects multi-stage builds", () =>
     Effect.gen(function* () {
-      const result = yield* validateDockerfile(
-        parseDockerfile(
-          "FROM python:3.12\nENV A=1\nWORKDIR /app\nCOPY . .\nRUN pip install -r requirements.txt",
-        ),
+      const result = yield* plan(
+        "FROM node AS build\nRUN true\nFROM node\nCOPY --from=build /a /a\n",
       ).pipe(Effect.result);
-      expect(Result.isSuccess(result)).toBe(true);
+      expect(Result.isFailure(result)).toBe(true);
+    }),
+  );
+
+  it.effect("checks appended commands the same way", () =>
+    Effect.gen(function* () {
+      expect(yield* checkCommands(["RUN apt-get update"])).toEqual(["RUN apt-get update"]);
+      const bad = yield* checkCommands(["VOLUME /data"]).pipe(Effect.result);
+      expect(Result.isFailure(bad)).toBe(true);
     }),
   );
 });

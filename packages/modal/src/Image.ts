@@ -1,16 +1,14 @@
+import * as BuildPlan from "@alchemy.run/docker/BuildPlan";
 import type { InlineDockerfile } from "@alchemy.run/docker/Dockerfile";
 import * as image from "@distilled.cloud/modal/image";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
+import { sha256Object } from "alchemy/Util/sha256";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import {
-  buildImage,
-  hashImageSpec,
-  lowerImageEnvironment,
-  type ImageBuildSpec,
-} from "./ImageBuild.ts";
+import { buildImage, type ImageBuildSpec } from "./ImageBuild.ts";
+import { checkCommands, lowerPlan, MODAL_CAPABILITIES } from "./ImagePlan.ts";
 import type { Providers } from "./Providers.ts";
 import { createSandbox } from "./SandboxClient.ts";
 
@@ -31,8 +29,10 @@ export interface ImageProps {
   image?: string;
   /**
    * Build from a Dockerfile: a path, or inline content
-   * (`Dockerfile.inline\`…\``). Modal's builder runs it: `USER` and `EXPOSE`,
-   * `HEALTHCHECK`, `LABEL`, `ONBUILD`, `STOPSIGNAL`, `VOLUME` fail at plan.
+   * (`Dockerfile.inline\`…\``). Modal's builder runs it, not Docker: a
+   * multi-stage build, BuildKit mounts, heredocs, `EXPOSE`, `HEALTHCHECK`,
+   * `LABEL`, `ONBUILD`, `STOPSIGNAL` and `VOLUME` fail at plan; `USER` is
+   * ignored (containers run as root) with a warning.
    */
   dockerfile?: string | InlineDockerfile;
   /** Build context for the Dockerfile's COPY/ADD sources. */
@@ -163,33 +163,46 @@ const idOf = <K extends string>(value: unknown, key: K): string | undefined =>
     : undefined;
 
 /** The build spec for an Image's props (Dockerfile lowered, context collected). */
-const specOf = Effect.fn(function* (news: ImageProps) {
-  const base: ImageBuildSpec = yield* lowerImageEnvironment({
-    image: news.image,
-    dockerfile: news.dockerfile,
-    context: news.context,
-    commands: news.commands,
-  });
+/**
+ * Plan an Image's build with the shared {@link BuildPlan}: its environment
+ * (`image`, `dockerfile`/`context`, or a Modal base via `from`) checked
+ * against what Modal's builder runs, then the `commands` appended.
+ */
+const planOf = Effect.fn(function* (news: ImageProps) {
   const fromId = idOf(news.from, "imageId");
-  return {
-    ...base,
-    ...(fromId !== undefined ? { dockerTag: undefined, baseImageId: fromId } : {}),
+  const source =
+    fromId !== undefined
+      ? { dockerfile: { content: "FROM base\n" } }
+      : news.dockerfile !== undefined || news.context !== undefined
+        ? { dockerfile: news.dockerfile, context: news.context }
+        : { image: news.image ?? "debian:bookworm-slim" };
+  const plan = yield* BuildPlan.plan(source, { capabilities: MODAL_CAPABILITIES });
+  const extra = yield* checkCommands(news.commands ?? []);
+  const lowered = yield* lowerPlan(plan, extra);
+  const spec: ImageBuildSpec = {
+    ...lowered,
+    // `FROM base` names the Modal image passed as a base image.
+    ...(fromId !== undefined ? { baseImageId: fromId, commands: lowered.commands.slice(1) } : {}),
     secretIds: (news.secrets ?? []).flatMap((s) => idOf(s, "secretId") ?? []),
     registry: news.registry
       ? { authType: news.registry.type, secretId: idOf(news.registry.secret, "secretId") ?? "" }
       : undefined,
     gpu: news.gpu,
     builderVersion: news.builderVersion,
-  } satisfies ImageBuildSpec;
-});
-
-const hashOf = Effect.fn(function* (news: ImageProps) {
-  const spec = yield* specOf(news);
-  const hash = yield* hashImageSpec(spec);
-  // The tag is published after the build, so it is part of the hash only to
-  // re-run reconcile when it changes.
-  const tagged = news.tag !== undefined ? `${hash}#${news.tag}` : hash;
-  return news.run ? `${tagged}:${JSON.stringify(news.run)}` : tagged;
+  };
+  const hash = yield* sha256Object({
+    plan: plan.hash,
+    from: fromId,
+    extra,
+    secrets: spec.secretIds,
+    registry: spec.registry,
+    gpu: spec.gpu,
+    builder: spec.builderVersion,
+    // `tag` and `run` happen after the build; part of the hash so a change re-runs reconcile.
+    tag: news.tag,
+    run: news.run,
+  });
+  return { spec, hash, warnings: plan.warnings };
 });
 
 export const ImageProvider = () =>
@@ -201,7 +214,7 @@ export const ImageProvider = () =>
         diff: Effect.fn(function* ({ news, output }) {
           if (!isResolved(news) || output === undefined) return undefined;
           // A changed build input (including files under `context`) is a new image.
-          const hash = yield* hashOf(news);
+          const { hash } = yield* planOf(news);
           return hash !== output.hash ? ({ action: "update" } as const) : undefined;
         }),
         read: Effect.fn(function* ({ output }) {
@@ -213,7 +226,8 @@ export const ImageProvider = () =>
         }),
         reconcile: Effect.fn(function* ({ news, output, session }) {
           const appId = idOf(news.app, "appId") ?? "";
-          const hash = yield* hashOf(news);
+          const { spec, hash, warnings } = yield* planOf(news);
+          for (const warning of warnings) yield* session.note(warning);
           // Observe: an image built from the same inputs still exists.
           if (output !== undefined && output.hash === hash && output.appId === appId) {
             const found = yield* image
@@ -223,7 +237,6 @@ export const ImageProvider = () =>
           }
           // Ensure: Modal content-addresses builds, so this is a no-op for
           // inputs it has built before.
-          const spec = yield* specOf(news);
           let imageId = yield* buildImage(appId, spec, { note: session.note });
           // Warm base: run setup in a sandbox and snapshot its filesystem.
           if (news.run && news.run.length > 0) {

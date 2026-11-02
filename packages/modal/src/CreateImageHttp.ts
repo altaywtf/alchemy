@@ -1,10 +1,11 @@
+import * as DockerfileParser from "@alchemy.run/docker/DockerfileParser";
 import * as image from "@distilled.cloud/modal/image";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { App } from "./App.ts";
 import { makeModalBinding } from "./BindingHttp.ts";
 import { CreateImage, type ImageBuildOptions, type ImagesClient } from "./CreateImage.ts";
-import { buildImage, parseDockerfile, validateDockerfile } from "./ImageBuild.ts";
+import { buildImage } from "./ImageBuild.ts";
 import type { ModalClient } from "./ModalBindings.ts";
 
 const toBytes = (data: string | Uint8Array) =>
@@ -12,9 +13,16 @@ const toBytes = (data: string | Uint8Array) =>
 
 /** Build one image from runtime options in `appId`. */
 export const buildFromOptions = Effect.fn(function* (appId: string, options: ImageBuildOptions) {
-  const dockerfile = options.dockerfile ? parseDockerfile(options.dockerfile) : [];
-  const commands = [...dockerfile.map((i) => i.text), ...(options.commands ?? [])];
-  yield* validateDockerfile(parseDockerfile(commands.join("\n")));
+  // Parsed to normalize it; Modal's builder rejects what it can't run.
+  // (The plan-time capability check lives with BuildPlan, which imports the
+  // bundler and so stays out of runtime bundles.)
+  const parsed =
+    options.dockerfile !== undefined
+      ? yield* DockerfileParser.parse(options.dockerfile)
+      : undefined;
+  const dockerfile = parsed ? DockerfileParser.renderLines(parsed) : [];
+  const extra = options.commands ?? [];
+  const commands = [...dockerfile, ...extra];
   const contextFiles = yield* Effect.forEach(
     Object.entries(options.files ?? {}),
     ([filename, data]) => Effect.map(toBytes(data), (bytes) => ({ filename, data: bytes })),
