@@ -39,7 +39,25 @@ export const buildFromOptions = Effect.fn(function* (appId: string, options: Ima
 export const makeImagesClient = (
   appId: Effect.Effect<string>,
   client: ModalClient,
+  environment: Effect.Effect<string | undefined> = Effect.succeed(undefined),
 ): ImagesClient => ({
+  fromTag: (tag) =>
+    client(
+      Effect.gen(function* () {
+        const env = yield* environment;
+        const found = yield* image
+          .imageGetByTag({ tag, environmentName: env ?? "" })
+          .pipe(Effect.catchTag("ImageNotFound", () => Effect.undefined));
+        return found?.imageId ? { imageId: found.imageId } : undefined;
+      }),
+    ),
+  publish: (target, tag) =>
+    client(
+      Effect.gen(function* () {
+        const env = yield* environment;
+        yield* image.publishImage({ imageId: target.imageId, tag, environmentName: env ?? "" });
+      }),
+    ),
   build: (options) => client(Effect.flatMap(appId, (id) => buildFromOptions(id, options))),
   delete: (target) =>
     client(
@@ -64,7 +82,8 @@ export const CreateImageHttp = Layer.effect(
     tag: "Modal.CreateImage",
     make: Effect.fn(function* (app: App, client) {
       const appId = yield* app.appId;
-      return makeImagesClient(appId, client);
+      const environment = yield* app.environment;
+      return makeImagesClient(appId, client, environment);
     }),
   }),
 );

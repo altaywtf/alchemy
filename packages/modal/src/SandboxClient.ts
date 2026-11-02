@@ -216,6 +216,16 @@ export interface SandboxHandleOf<R> {
   }): Effect.Effect<void, any, R>;
   /** Replace the sandbox's tags. */
   setTags(tags: Record<string, string>): Effect.Effect<void, any, R>;
+  /** The sandbox's tags. */
+  getTags(): Effect.Effect<Record<string, string>, any, R>;
+  /** Name the sandbox (unique among its app's running sandboxes) so `fromName` finds it. */
+  setName(name: string): Effect.Effect<void, any, R>;
+  /** CPU, memory and GPU used so far (core-seconds, GiB-seconds, GPU-seconds). */
+  resourceUsage(): Effect.Effect<
+    { readonly cpuSeconds: number; readonly memoryGibSeconds: number; readonly gpuSeconds: number },
+    any,
+    R
+  >;
   /** The main process's output so far. */
   logs(options?: { readonly timeout?: DurationInput }): Effect.Effect<string, any, R>;
   /** Wait for the sandbox to finish; `undefined` exit code while still running. */
@@ -650,6 +660,21 @@ export const sandboxHandle = (
         environmentName: environmentOf(target.environment),
         tags: Object.entries(tags).map(([tagName, tagValue]) => ({ tagName, tagValue })),
       });
+    }),
+    getTags: Effect.fn(function* () {
+      const { tags } = yield* sandbox.sandboxTagsGetV2({ sandboxId });
+      return Object.fromEntries((tags ?? []).map((t) => [t.tagName ?? "", t.tagValue ?? ""]));
+    }),
+    setName: Effect.fn(function* (name) {
+      yield* sandbox.sandboxSetName({ sandboxId, name });
+    }),
+    resourceUsage: Effect.fn(function* () {
+      const usage = yield* sandbox.sandboxGetResourceUsage({ sandboxId });
+      return {
+        cpuSeconds: Number(usage.cpuCoreNanosecs ?? 0) / 1e9,
+        memoryGibSeconds: Number(usage.memGibNanosecs ?? 0) / 1e9,
+        gpuSeconds: Number(usage.gpuNanosecs ?? 0) / 1e9,
+      };
     }),
     logs: Effect.fn(function* (options = {}) {
       const { items } = yield* sandbox.sandboxGetLogs({

@@ -6,7 +6,15 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
-import { envNameOf, environmentOf, type EnvironmentInput, objectName } from "./internal.ts";
+import {
+  environmentNames,
+  envNameOf,
+  environmentOf,
+  isGeneratedName,
+  listAll,
+  type EnvironmentInput,
+  objectName,
+} from "./internal.ts";
 import type { Providers } from "./Providers.ts";
 
 /** Provisioning failed, was cancelled, or didn't finish in time. */
@@ -332,6 +340,25 @@ export const EndpointProvider = () =>
             url: live.info?.serviceUrl ?? "",
             requiresAuth: live.info?.requiresProxyAuth ?? true,
           };
+        }),
+        list: Effect.fn(function* () {
+          const envs = yield* environmentNames;
+          const all: EndpointAttributes[] = [];
+          for (const env of envs) {
+            const items = yield* listAll(
+              (pagination) =>
+                endpoint
+                  .listEndpoint({ environmentName: env, pagination })
+                  .pipe(Effect.map((response) => response.items ?? [])),
+              (item) => item.updatedAt,
+            );
+            for (const item of items) {
+              if (!item.endpointId || !isGeneratedName(item.name)) continue;
+              const found = yield* lookup(item.name ?? "", env);
+              if (found) all.push(found);
+            }
+          }
+          return all;
         }),
         delete: Effect.fn(function* ({ output }) {
           yield* endpoint

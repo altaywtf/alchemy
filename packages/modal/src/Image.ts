@@ -59,6 +59,12 @@ export interface ImageProps {
   gpu?: string;
   /** Pin Modal's image builder version (`"2025.06"`). */
   builderVersion?: string;
+  /**
+   * Publish the image under this tag in its app's environment, so code
+   * outside the Stack finds it with `images.fromTag(tag)` or
+   * `modal.Image.from_tag`.
+   */
+  tag?: string;
 }
 
 export interface ImageAttributes {
@@ -180,7 +186,10 @@ const specOf = Effect.fn(function* (news: ImageProps) {
 const hashOf = Effect.fn(function* (news: ImageProps) {
   const spec = yield* specOf(news);
   const hash = yield* hashImageSpec(spec);
-  return news.run ? `${hash}:${JSON.stringify(news.run)}` : hash;
+  // The tag is published after the build, so it is part of the hash only to
+  // re-run reconcile when it changes.
+  const tagged = news.tag !== undefined ? `${hash}#${news.tag}` : hash;
+  return news.run ? `${tagged}:${JSON.stringify(news.run)}` : tagged;
 });
 
 export const ImageProvider = () =>
@@ -241,6 +250,13 @@ export const ImageProvider = () =>
               return yield* box.snapshotFilesystem("5 minutes");
             }).pipe(Effect.ensuring(Effect.ignore(box.terminate())));
             imageId = snapshot.imageId;
+          }
+          if (news.tag !== undefined) {
+            yield* image.publishImage({
+              imageId,
+              tag: news.tag,
+              environmentName: idOf(news.app, "environment") ?? "",
+            });
           }
           return {
             imageId,

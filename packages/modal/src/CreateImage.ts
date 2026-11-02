@@ -32,6 +32,15 @@ export interface ImagesClient {
   build(
     options: ImageBuildOptions,
   ): Effect.Effect<{ readonly imageId: string }, any, RuntimeContext>;
+  /** The image published under `tag`, or `undefined`. */
+  fromTag(
+    tag: string,
+  ): Effect.Effect<{ readonly imageId: string } | undefined, any, RuntimeContext>;
+  /** Publish an image under `tag` (moving the tag if it points elsewhere). */
+  publish(
+    image: { readonly imageId: string },
+    tag: string,
+  ): Effect.Effect<void, any, RuntimeContext>;
   /** Delete an image. */
   delete(image: { readonly imageId: string }): Effect.Effect<void, any, RuntimeContext>;
 }
