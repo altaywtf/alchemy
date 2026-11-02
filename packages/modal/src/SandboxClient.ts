@@ -1,5 +1,6 @@
 import * as container from "@distilled.cloud/modal/container";
 import { withTaskCommandRouter } from "@distilled.cloud/modal/Credentials";
+import * as persistent from "@distilled.cloud/modal/persistent";
 import type { ModalOpContext } from "@distilled.cloud/modal/Protocol";
 import * as sandbox from "@distilled.cloud/modal/sandbox";
 import * as router from "@distilled.cloud/modal/task_command_router";
@@ -9,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import type * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as Schedule from "effect/Schedule";
 import { buildImage, gpuConfig, type ImageBuildSpec } from "./ImageBuild.ts";
 import { environmentOf, seconds } from "./internal.ts";
 
@@ -896,4 +898,82 @@ export const restoreSandbox = Effect.fn(function* (
     return yield* new SandboxUnexpectedResponse({ message: "Modal returned no restored sandbox" });
   }
   return sandboxHandle(restored.sandboxId, target);
+});
+
+/**
+ * Options for a persistent sandbox. Modal fixes each session's lifetime (an
+ * hour, paused after five idle minutes) and doesn't support names, GPUs,
+ * `env`, tags or memory snapshots on persistent sandboxes yet.
+ */
+export type PersistentSandboxCreateOptions = Omit<
+  SandboxCreateOptions,
+  "timeout" | "idleTimeout" | "name" | "gpu" | "env" | "tags" | "enableSnapshot"
+>;
+
+/** Modal's session limits for persistent sandboxes. */
+const PERSISTENT_SESSION = { timeout: 60 * 60, idleTimeout: 5 * 60 } as const;
+
+/** A persistent sandbox: one box whose filesystem outlives its sessions. */
+export interface PersistentSandboxHandleOf<R> {
+  readonly persistentSandboxId: string;
+  /**
+   * The running session, resuming the box from its last session's
+   * filesystem when it's paused.
+   */
+  session(): Effect.Effect<SandboxHandleOf<R>, any, R>;
+  /** Terminate the box for good. */
+  terminate(): Effect.Effect<void, any, R>;
+}
+
+export type RawPersistentSandboxHandle = PersistentSandboxHandleOf<ModalOpContext>;
+export type PersistentSandboxHandle = PersistentSandboxHandleOf<RuntimeContext>;
+
+/** The handle for an existing persistent sandbox id. */
+export const persistentSandboxHandle = (
+  persistentSandboxId: string,
+  target: Pick<SandboxTarget, "environment" | "program">,
+): RawPersistentSandboxHandle => ({
+  persistentSandboxId,
+  session: Effect.fn(function* () {
+    const running = yield* persistent.getPersistentSandbox({ persistentSandboxId });
+    if (running.sandboxId) return sandboxHandle(running.sandboxId, target);
+    // A paused box resumes from its last session's filesystem. Modal answers
+    // busy while the previous session is still saving it.
+    const resumed = yield* persistent.resumePersistentSandbox({ persistentSandboxId }).pipe(
+      Effect.retry({
+        while: (error) => error._tag === "PersistentSandboxBusy",
+        schedule: Schedule.spaced("1 second"),
+        times: 60,
+      }),
+    );
+    if (!resumed.sandboxId) {
+      return yield* new SandboxUnexpectedResponse({
+        message: `Modal returned no session for persistent sandbox ${persistentSandboxId}`,
+      });
+    }
+    return sandboxHandle(resumed.sandboxId, target);
+  }),
+  terminate: Effect.fn(function* () {
+    yield* persistent
+      .terminatePersistentSandbox({ persistentSandboxId })
+      .pipe(Effect.catchTag("PersistentSandboxNotFound", () => Effect.void));
+  }),
+});
+
+/** Create a persistent sandbox in `target`'s app. */
+export const createPersistentSandbox = Effect.fn(function* (
+  target: SandboxTarget,
+  options: PersistentSandboxCreateOptions = {},
+) {
+  const imageId = yield* resolveSandboxImage(target, options.image);
+  const created = yield* persistent.createPersistentSandbox({
+    appId: target.appId,
+    definition: definitionOf(imageId, { ...options, ...PERSISTENT_SESSION }),
+  });
+  if (!created.persistentSandboxId) {
+    return yield* new SandboxUnexpectedResponse({
+      message: "Modal returned no persistent sandbox id",
+    });
+  }
+  return persistentSandboxHandle(created.persistentSandboxId, target);
 });

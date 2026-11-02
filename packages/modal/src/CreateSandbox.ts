@@ -4,10 +4,17 @@ import type * as Effect from "effect/Effect";
 import type { App } from "./App.ts";
 import type { Image } from "./Image.ts";
 import type { Sandbox } from "./Sandbox.ts";
-import type { SandboxCreateOptions, SandboxHandle } from "./SandboxClient.ts";
+import type {
+  PersistentSandboxCreateOptions,
+  PersistentSandboxHandle,
+  SandboxCreateOptions,
+  SandboxHandle,
+} from "./SandboxClient.ts";
 
 export type {
   ExecOptions,
+  PersistentSandboxCreateOptions,
+  PersistentSandboxHandle,
   ExecResult,
   HeaderReplacement,
   SandboxCreateOptions,
@@ -22,6 +29,16 @@ export interface SandboxSummary {
   readonly name: string | undefined;
   readonly createdAt: number | undefined;
   readonly tags: Record<string, string>;
+}
+
+/** Sandbox cost for one combination of tag values. */
+export interface SandboxUsageGroup {
+  /** The grouped tags' values. */
+  readonly tags: Record<string, string>;
+  /** Total cost in USD. */
+  readonly cost: number;
+  /** Cost by resource (`cpu`, `memory`, `gpu`, ...). */
+  readonly costByResource: Record<string, number>;
 }
 
 /** Create and find sandboxes in one App. Every handle method calls Modal. */
@@ -39,6 +56,28 @@ export interface SandboxesClient {
     readonly tags?: Record<string, string>;
     readonly includeFinished?: boolean;
   }): Effect.Effect<ReadonlyArray<SandboxSummary>, any, RuntimeContext>;
+  /**
+   * Create a persistent sandbox: one box whose filesystem outlives its
+   * sessions. Each session runs up to an hour and pauses after five idle
+   * minutes; `session()` resumes it from where it stopped.
+   */
+  createPersistent(
+    options?: PersistentSandboxCreateOptions,
+  ): Effect.Effect<PersistentSandboxHandle, any, RuntimeContext>;
+  /** A persistent sandbox by id (a `Modal.PersistentSandbox`, or one `createPersistent` made). */
+  persistent(
+    box: string | { readonly persistentSandboxId: string },
+  ): Effect.Effect<PersistentSandboxHandle>;
+  /**
+   * What the App's sandboxes cost over a time range, grouped by tag values
+   * (`groupByTags: ["user"]` gives one group per user).
+   */
+  usage(query: {
+    readonly since: Date | string | number;
+    readonly until?: Date | string | number;
+    readonly groupByTags?: ReadonlyArray<string>;
+    readonly tags?: Record<string, string>;
+  }): Effect.Effect<ReadonlyArray<SandboxUsageGroup>, any, RuntimeContext>;
   /** Start a new sandbox from a memory snapshot (`handle.snapshotMemory()`). */
   restore(
     snapshot: { readonly snapshotId: string },
@@ -111,6 +150,16 @@ export interface SandboxesClient {
  *     ],
  *   },
  * });
+ * ```
+ *
+ * ### Persistent sandboxes
+ * **Example:** A box per user that keeps its files between sessions
+ * ```typescript
+ * const box = yield* sandboxes.createPersistent({ image: "node:22-bookworm" });
+ * const session = yield* box.session();
+ * yield* session.exec(["sh", "-c", "echo hi >> /root/notes.txt"]);
+ * // later, from any request: resumes the box if it paused
+ * const again = yield* (yield* sandboxes.persistent(box.persistentSandboxId)).session();
  * ```
  *
  * ### Snapshots

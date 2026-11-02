@@ -12,6 +12,11 @@ export interface FunctionRef {
   readonly function: string;
   /** Environment the App is deployed in. @default the workspace default */
   readonly environment?: string;
+  /**
+   * Parameters of a parameterized class (`modal.parameter()` fields), for a
+   * `"Class.method"` target. Modal runs one set of containers per value set.
+   */
+  readonly parameters?: Record<string, string | number | boolean | Uint8Array>;
 }
 
 /** What a function binding targets: a `Modal.Function` of the Stack, or a deployed function by name. */
@@ -105,6 +110,16 @@ export interface FunctionClient {
  * ```typescript
  * const embed = yield* Modal.InvokeFunction({ app: "inference", function: "embed" });
  * const vector = yield* embed.call<number[]>(["hello world"]);
+ * ```
+ *
+ * **Example:** A method of a parameterized Python class
+ * ```typescript
+ * const model = yield* Modal.InvokeFunction({
+ *   app: "inference",
+ *   function: "Model.generate",
+ *   parameters: { size: "7b" },
+ * });
+ * const text = yield* model.call<string>(["hello"]);
  * ```
  *
  * ### Fan out

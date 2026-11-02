@@ -6115,6 +6115,22 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  examples/modal-functions:
+    dependencies:
+      '@alchemy.run/modal':
+        specifier: workspace:*
+        version: link:../../packages/modal
+      alchemy:
+        specifier: workspace:*
+        version: link:../../packages/alchemy
+      effect:
+        specifier: 4.1.0
+        version: 4.1.0
+    devDependencies:
+      '@alchemy.run/test':
+        specifier: workspace:*
+        version: link:../../packages/alchemy-test
+
   examples/monorepo-multi-stack/backend:
     dependencies:
       '@alchemy.run/cloudflare':

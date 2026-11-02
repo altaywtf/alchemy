@@ -41,6 +41,7 @@
         "worker": "./src/index.ts",
         "default": "./lib/index.js"
       },
+      "./internal/*": null,
       "./internal": null,
       "./*": {
         "types": "./lib/*.d.ts",

@@ -344,6 +344,9 @@
       "path": "./examples/cloudflare-modal-sandbox/tsconfig.json"
     },
     {
+      "path": "./examples/modal-functions/tsconfig.json"
+    },
+    {
       "path": "./examples/cloudflare-secrets-store/tsconfig.json"
     },
     {

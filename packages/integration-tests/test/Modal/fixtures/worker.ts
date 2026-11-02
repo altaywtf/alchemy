@@ -114,13 +114,40 @@ export default class ModalWorker extends Cloudflare.Worker<ModalWorker>()(
               found: found?.sandboxId,
             });
           }
+          case "/sandbox-persistent": {
+            const box = yield* appSandboxes.createPersistent({ image: "debian:bookworm-slim" });
+            const out = yield* Effect.gen(function* () {
+              const session = yield* box.session();
+              yield* session.writeFile("/root/notes.txt", `kept ${key}`);
+              // A second handle by id reaches the same running session.
+              const again = yield* (yield* appSandboxes.persistent(box)).session();
+              return { read: yield* again.readFileString("/root/notes.txt") };
+            }).pipe(Effect.ensuring(Effect.ignore(box.terminate())));
+            return yield* HttpServerResponse.json(out);
+          }
+          case "/sandbox-usage": {
+            const groups = yield* appSandboxes.usage({
+              since: Date.now() - 86_400_000,
+              groupByTags: ["test"],
+            });
+            return yield* HttpServerResponse.json({ groups: groups.length });
+          }
           case "/image": {
             const image = yield* images.build({
               image: "debian:bookworm-slim",
               commands: ["COPY hello.txt /hello.txt"],
               files: { "hello.txt": `hello ${key}` },
             });
-            return yield* HttpServerResponse.json(image);
+            const tag = `bindings-${key}`;
+            yield* images.publish(image, tag);
+            const published = yield* images.fromTag(tag);
+            yield* images.unpublish(tag);
+            const unpublished = yield* images.fromTag(tag);
+            return yield* HttpServerResponse.json({
+              imageId: image.imageId,
+              published: published?.imageId,
+              unpublished: unpublished?.imageId ?? null,
+            });
           }
           case "/open": {
             const v = yield* volumes.getOrCreate(`open-${key}`);

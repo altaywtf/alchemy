@@ -1,9 +1,9 @@
 ---
 title: Modal
-description: Run agent sandboxes, build images, and keep files on Modal from your Workers and Lambdas.
+description: Run functions, servers and agent sandboxes on Modal, and keep files there, from your Workers and Lambdas.
 ---
 
-Modal runs sandboxes: short-lived containers you create from code, with GPUs if you want them. Declare their images, volumes and secrets in your Stack, and create sandboxes from any Worker or Lambda.
+Modal runs your code in containers, with GPUs if you want them: functions and servers that scale with traffic, and sandboxes you create from code. Declare them with their images, volumes and secrets in your Stack, and call them from any Worker or Lambda.
 
 New here? [Set up credentials](/modal/setup) first, then [build the tutorial](/modal/tutorial/part-1).
 
@@ -86,11 +86,11 @@ Each user gets their own volume, created by name the first time they call. The c
 ## Where next
 
 - [Concepts](/modal/concepts): environments, apps, and objects you create at runtime
-- Sandboxes: [Sandboxes](/modal/sandboxes/sandboxes), [Programs](/modal/sandboxes/programs), [Images](/modal/sandboxes/images), [Snapshots](/modal/sandboxes/snapshots)
+- Sandboxes: [Sandboxes](/modal/sandboxes/sandboxes), [Programs](/modal/sandboxes/programs), [Images](/modal/sandboxes/images), [Snapshots](/modal/sandboxes/snapshots), [Persistent sandboxes](/modal/sandboxes/persistent)
 - Storage: [Volumes](/modal/storage/volumes), [Dicts](/modal/storage/dicts), [Queues](/modal/storage/queues)
 - Security: [Network & secrets](/modal/security/network-and-secrets), [Access control](/modal/security/access-control)
-- Functions: [Call Python functions](/modal/functions/calling-functions), [Autoscaling](/modal/functions/autoscaling)
+- Services: [Functions](/modal/services/functions), [Web endpoints](/modal/services/web-endpoints), [Servers](/modal/services/servers), [Operate services](/modal/services/operating), [Call Python functions](/modal/services/calling-python), [Autoscaling](/modal/services/autoscaling)
 
 ## Out of scope
 
-Alchemy doesn't deploy Python functions: Modal builds them from Python source with `modal deploy`. Call them with `Modal.InvokeFunction` and tune them with `Modal.FunctionAutoscaler`. Billing reports, notebooks and Modal's internal container RPCs aren't modeled.
+Alchemy deploys your JavaScript programs as Functions and Servers. It doesn't deploy Python source: deploy that with `modal deploy`, then call it with `Modal.InvokeFunction` and tune it with `Modal.FunctionAutoscaler`. Billing reports, audit logs, cluster reservations and Modal's internal container RPCs aren't modeled.

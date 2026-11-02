@@ -21,6 +21,24 @@ export const Production = Modal.Environment("Production", {
 
 Members not listed get `defaultMemberRole`.
 
+## Give CI its own identity
+
+```typescript
+// src/Identities.ts
+import * as Modal from "@alchemy.run/modal";
+import * as Effect from "effect/Effect";
+import { Production } from "./Environments.ts";
+
+export const Deployer = Effect.gen(function* () {
+  const production = yield* Production;
+  return yield* Modal.ServiceUser("Deployer", {
+    environments: [{ environment: production, role: "contributor" }],
+  });
+});
+```
+
+A scoped service user acts only in the environments you list. Its `tokenId` and `tokenSecret` are a `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` pair.
+
 ## Share one port
 
 ```typescript

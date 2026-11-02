@@ -71,7 +71,7 @@ const lookupMount = (deploymentName: string) =>
   });
 
 /** The mount holding Modal's Python client, which runs the container entrypoint. */
-export const clientMount = lookupMount(`modal-client-mount-${MODAL_CLIENT_VERSION}`);
+export const clientMount = /*@__PURE__*/ lookupMount(`modal-client-mount-${MODAL_CLIENT_VERSION}`);
 
 /**
  * The image builder version builds use: the resource's pin, else the

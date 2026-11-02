@@ -41,6 +41,8 @@ export interface ImagesClient {
     image: { readonly imageId: string },
     tag: string,
   ): Effect.Effect<void, any, RuntimeContext>;
+  /** Remove a published tag (`name` or `name:tag`); the image itself stays. */
+  unpublish(tag: string): Effect.Effect<void, any, RuntimeContext>;
   /** Delete an image. */
   delete(image: { readonly imageId: string }): Effect.Effect<void, any, RuntimeContext>;
 }

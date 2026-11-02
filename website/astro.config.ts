@@ -1372,6 +1372,7 @@ export default defineConfig({
                 { label: "Programs", link: "/modal/sandboxes/programs" },
                 { label: "Images", link: "/modal/sandboxes/images" },
                 { label: "Snapshots", link: "/modal/sandboxes/snapshots" },
+                { label: "Persistent sandboxes", link: "/modal/sandboxes/persistent" },
               ],
             },
             {
@@ -1390,10 +1391,14 @@ export default defineConfig({
               ],
             },
             {
-              label: "Functions",
+              label: "Services",
               items: [
-                { label: "Call Python functions", link: "/modal/functions/calling-functions" },
-                { label: "Autoscaling", link: "/modal/functions/autoscaling" },
+                { label: "Functions", link: "/modal/services/functions" },
+                { label: "Web endpoints", link: "/modal/services/web-endpoints" },
+                { label: "Servers", link: "/modal/services/servers" },
+                { label: "Operate services", link: "/modal/services/operating" },
+                { label: "Call Python functions", link: "/modal/services/calling-python" },
+                { label: "Autoscaling", link: "/modal/services/autoscaling" },
               ],
             },
             providerResourcesEntry("Modal"),

@@ -13,11 +13,13 @@ import { Environment, EnvironmentProvider } from "./Environment.ts";
 import { Function, FunctionProvider } from "./Function.ts";
 import { FunctionAutoscaler, FunctionAutoscalerProvider } from "./FunctionAutoscaler.ts";
 import { Image, ImageProvider } from "./Image.ts";
+import { PersistentSandbox, PersistentSandboxProvider } from "./PersistentSandbox.ts";
 import { Proxy, ProxyProvider } from "./Proxy.ts";
 import { Queue, QueueProvider } from "./Queue.ts";
 import { Sandbox, SandboxProvider } from "./Sandbox.ts";
 import { Secret, SecretProvider } from "./Secret.ts";
 import { Server, ServerProvider } from "./Server.ts";
+import { ServiceUser, ServiceUserProvider } from "./ServiceUser.ts";
 import { Volume, VolumeProvider } from "./Volume.ts";
 import { WebhookToken, WebhookTokenProvider } from "./WebhookToken.ts";
 import { WorkspaceSettings, WorkspaceSettingsProvider } from "./WorkspaceSettings.ts";
@@ -51,11 +53,13 @@ export const providers = () =>
       Function,
       FunctionAutoscaler,
       Image,
+      PersistentSandbox,
       Proxy,
       Queue,
       Sandbox,
       Secret,
       Server,
+      ServiceUser,
       Volume,
       WebhookToken,
       WorkspaceSettings,
@@ -71,11 +75,13 @@ export const providers = () =>
         FunctionProvider(),
         FunctionAutoscalerProvider(),
         ImageProvider(),
+        PersistentSandboxProvider(),
         ProxyProvider(),
         QueueProvider(),
         SandboxProvider(),
         SecretProvider(),
         ServerProvider(),
+        ServiceUserProvider(),
         VolumeProvider(),
         WebhookTokenProvider(),
         WorkspaceSettingsProvider(),

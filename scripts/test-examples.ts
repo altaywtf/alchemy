@@ -54,6 +54,8 @@ const examples = [
   "./examples/cloudflare-website-vocs",
   "./examples/cloudflare-agents",
   "./examples/cloudflare-flue",
+  "./examples/cloudflare-modal-sandbox",
+  "./examples/modal-functions",
   "./examples/aws-dev",
   // "./examples/aws-ecs",
   "./examples/aws-lambda",

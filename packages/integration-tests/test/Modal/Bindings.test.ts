@@ -125,12 +125,39 @@ describe("CreateSandbox", () => {
   );
 });
 
+describe("CreateSandbox persistent", () => {
+  test(
+    "create a persistent sandbox and reach its session by id",
+    Effect.gen(function* () {
+      const body = yield* get<{ read: string }>("/sandbox-persistent?key=p1");
+      expect(body.read).toBe("kept p1");
+    }),
+    { tags: tags("sandbox"), timeout: 300_000 },
+  );
+});
+
+describe("CreateSandbox usage", () => {
+  test(
+    "report sandbox cost grouped by tag",
+    Effect.gen(function* () {
+      yield* get("/sandbox?key=u1");
+      const body = yield* get<{ groups: number }>("/sandbox-usage");
+      expect(body.groups).toBeGreaterThanOrEqual(0);
+    }),
+    { tags: tags("sandbox"), timeout: 300_000 },
+  );
+});
+
 describe("CreateImage", () => {
   test(
     "build an image with a context file at runtime",
     Effect.gen(function* () {
-      const body = yield* get<{ imageId: string }>("/image?key=i1");
+      const body = yield* get<{ imageId: string; published: string; unpublished: string | null }>(
+        "/image?key=i1",
+      );
       expect(body.imageId).toMatch(/^im-/);
+      expect(body.published).toBe(body.imageId);
+      expect(body.unpublished).toBeNull();
     }),
     { tags: tags("image"), timeout: 600_000 },
   );

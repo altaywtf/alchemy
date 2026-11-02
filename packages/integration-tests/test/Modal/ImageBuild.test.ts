@@ -1,6 +1,7 @@
 import * as BuildPlan from "@alchemy.run/docker/BuildPlan";
 import { decodeCbor, encodeCbor } from "@alchemy.run/modal/Cbor";
 import { checkCommands, MODAL_CAPABILITIES } from "@alchemy.run/modal/ImagePlan";
+import { planRuntimeImage } from "@alchemy.run/modal/internal/Deploy";
 import { describe, expect, it, layer } from "@alchemy.run/test";
 import { BunServices } from "@effect/platform-bun";
 import * as Effect from "effect/Effect";
@@ -46,6 +47,25 @@ layer(BunServices.layer)("Modal build capabilities", (it) => {
         "FROM node AS build\nRUN true\nFROM node\nCOPY --from=build /a /a\n",
       ).pipe(Effect.result);
       expect(Result.isFailure(result)).toBe(true);
+    }),
+  );
+
+  it.effect("plans a Function image without the image's start command", () =>
+    Effect.gen(function* () {
+      const main = new URL("./fixtures/lifecycle-program.ts", import.meta.url).pathname;
+      const planned = yield* planRuntimeImage(
+        "Modal.Function",
+        { main, commands: ["RUN echo extra"] },
+        8000,
+        undefined,
+      );
+      expect(planned.plan.base).toBe("oven/bun:1");
+      expect(planned.command[0]).toBe("bun");
+      expect(planned.python).toBe("3.12");
+      const starts = planned.spec.commands.filter((line) => /^(ENTRYPOINT|CMD)\b/.test(line));
+      expect(starts).toEqual(["ENTRYPOINT []"]);
+      expect(planned.spec.commands).toContain("RUN echo extra");
+      expect(planned.spec.commands.some((line) => line.startsWith("FROM"))).toBe(false);
     }),
   );
 

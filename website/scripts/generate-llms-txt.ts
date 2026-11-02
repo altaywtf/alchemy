@@ -526,7 +526,7 @@ const SECTIONS: Section[] = [
   { heading: "Modal — Sandboxes", pages: { directory: "modal/sandboxes" } },
   { heading: "Modal — Storage", pages: { directory: "modal/storage" } },
   { heading: "Modal — Security", pages: { directory: "modal/security" } },
-  { heading: "Modal — Functions", pages: { directory: "modal/functions" } },
+  { heading: "Modal — Services", pages: { directory: "modal/services" } },
   {
     heading: "Better Auth",
     intro:

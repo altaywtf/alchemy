@@ -33,6 +33,17 @@ export interface AppReader {
   logs(
     query: TimeRange & AppLogFilter & { readonly limit?: number },
   ): Effect.Effect<ReadonlyArray<AppLogLine>, any, RuntimeContext>;
+  /**
+   * Follow the App's logs: lines after `cursor` (or the latest), waiting up
+   * to `timeout` for new ones. Pass the returned cursor to the next call.
+   */
+  tail(
+    query?: AppLogFilter & { readonly cursor?: string; readonly timeout?: number },
+  ): Effect.Effect<
+    { readonly lines: ReadonlyArray<AppLogLine>; readonly cursor: string | undefined },
+    any,
+    RuntimeContext
+  >;
   /** Log lines per time bucket. */
   logCount(
     query: TimeRange & AppLogFilter & { readonly bucketSecs?: number },

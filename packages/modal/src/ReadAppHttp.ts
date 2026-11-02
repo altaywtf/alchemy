@@ -71,6 +71,37 @@ export const ReadAppHttp = Layer.effect(
               ),
             ),
           ),
+        tail: (query = {}) =>
+          client(
+            Effect.flatMap(appId, (id) =>
+              app.appGetLogs({
+                appId: id,
+                timeout: query.timeout ?? 10,
+                lastEntryId: query.cursor,
+                functionId: query.functionId,
+                functionCallId: query.functionCallId,
+                taskId: query.containerId,
+                sandboxId: query.sandboxId,
+                searchText: query.search,
+                fileDescriptor: query.stream ? STREAM[query.stream] : undefined,
+              }),
+            ).pipe(
+              Effect.map(({ items }) => ({
+                lines: items.flatMap((batch) =>
+                  (batch.items ?? []).map((line) => ({
+                    data: line.data ?? "",
+                    timestamp: line.timestamp,
+                    stream: streamOf(line.fileDescriptor),
+                    functionId: batch.functionId,
+                    functionCallId: line.functionCallId,
+                    containerId: line.containerId ?? batch.taskId,
+                    sandboxId: batch.sandboxId,
+                  })),
+                ),
+                cursor: items.findLast((batch) => batch.entryId)?.entryId ?? query.cursor,
+              })),
+            ),
+          ),
         logCount: (query) =>
           client(
             Effect.flatMap(appId, (id) =>

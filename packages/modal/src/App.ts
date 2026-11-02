@@ -50,14 +50,14 @@ export interface AppAttributes {
 }
 
 /**
- * A Modal App: the named, persistent namespace that Sandboxes, Images and
- * Functions run under. Every Sandbox belongs to an App, and stopping the App
- * terminates its Sandboxes.
+ * A Modal App: the named, persistent namespace that Functions, Servers,
+ * Sandboxes and Images run under. Each `Modal.Function` and `Modal.Server`
+ * of the Stack is published into its App, and stopping the App (destroying
+ * this resource) stops them and terminates its Sandboxes.
  *
  * An App deployed with Modal's Python client (`modal deploy`) can also be
  * referenced by name from {@link InvokeFunction} and
- * {@link FunctionAutoscaler}; this resource is for apps Alchemy owns, such as
- * the home of an agent's sandboxes.
+ * {@link FunctionAutoscaler}.
  *
  * ### Creating an App
  * **Example:** An app for sandboxes

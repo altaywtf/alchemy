@@ -65,8 +65,9 @@ export interface FunctionAutoscalerAttributes {
  * client (`modal deploy`): warm containers, a container cap, buffer
  * containers and scale-down timing, changed without redeploying the app.
  *
- * Alchemy doesn't deploy Python functions (Modal builds them from Python
- * source). This resource adjusts one that is already deployed, and restores
+ * For a `Modal.Function` or `Modal.Server` of the Stack, set these on the
+ * resource itself. This resource adjusts a function deployed outside the
+ * Stack, and restores
  * the settings it found when destroyed. Modal resets overrides like these
  * when the app is redeployed, so redeploying the app and then this stack
  * applies them again.

@@ -66,6 +66,15 @@ export const makeImagesClient = (
         yield* image.publishImage({ imageId: target.imageId, tag, environmentName: env ?? "" });
       }),
     ),
+  unpublish: (tag) =>
+    client(
+      Effect.gen(function* () {
+        const env = yield* environment;
+        yield* image
+          .deleteImageName({ tag: env ? `${env}/${tag}` : tag })
+          .pipe(Effect.catchTag("ImageNotFound", () => Effect.void));
+      }),
+    ),
   build: (options) => client(Effect.flatMap(appId, (id) => buildFromOptions(id, options))),
   delete: (target) =>
     client(

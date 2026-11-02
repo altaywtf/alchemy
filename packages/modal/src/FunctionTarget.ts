@@ -1,4 +1,9 @@
+import {
+  serializeClassParameters,
+  type ClassParameterValue,
+} from "@distilled.cloud/modal/ClassParameters";
 import * as functions from "@distilled.cloud/modal/functions";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { environmentOf } from "./internal.ts";
 import type { FunctionRef, FunctionTarget } from "./InvokeFunction.ts";
@@ -22,6 +27,62 @@ export interface ResolvedFunction {
   readonly method: string | undefined;
 }
 
+/** A parameter value missing from a parameterized class call. */
+export class FunctionParameterMissing extends Data.TaggedError("Modal.FunctionParameterMissing")<{
+  readonly message: string;
+}> {}
+
+const PARAM_TYPE = {
+  string: "PARAM_TYPE_STRING",
+  number: "PARAM_TYPE_INT",
+  boolean: "PARAM_TYPE_BOOL",
+  bytes: "PARAM_TYPE_BYTES",
+} as const;
+
+/**
+ * Serialize class parameters as Modal's `ClassParameterSet`, in the class's
+ * schema order with its defaults applied, as Modal's clients do: the bytes
+ * identify the bound function.
+ */
+const serializeParameters = Effect.fn(function* (
+  schema: ReadonlyArray<functions.ClassParameterSpec>,
+  values: Record<string, string | number | boolean | Uint8Array>,
+) {
+  const parameters: Array<ClassParameterValue> = [];
+  for (const spec of schema) {
+    const name = spec.name ?? "";
+    const value = values[name];
+    if (value === undefined) {
+      if (!spec.hasDefault) {
+        return yield* new FunctionParameterMissing({ message: `Missing class parameter ${name}` });
+      }
+      parameters.push({
+        name,
+        type: spec.type ?? "PARAM_TYPE_UNSPECIFIED",
+        stringValue: spec.stringDefault,
+        intValue: spec.intDefault,
+        bytesValue: spec.bytesDefault,
+        boolValue: spec.boolDefault,
+      });
+      continue;
+    }
+    parameters.push(
+      typeof value === "string"
+        ? { name, type: PARAM_TYPE.string, stringValue: value }
+        : typeof value === "number"
+          ? { name, type: PARAM_TYPE.number, intValue: String(Math.trunc(value)) }
+          : typeof value === "boolean"
+            ? { name, type: PARAM_TYPE.boolean, boolValue: value }
+            : {
+                name,
+                type: PARAM_TYPE.bytes,
+                bytesValue: Buffer.from(value).toString("base64"),
+              },
+    );
+  }
+  return yield* Effect.sync(() => serializeClassParameters(parameters));
+});
+
 /**
  * Resolve a target in the construction phase. A resource of the Stack
  * carries its id; a name is looked up on first use and cached (the id only
@@ -43,16 +104,28 @@ export const resolveFunction = Effect.fn(function* (
   const functionId = Effect.suspend(() =>
     cached !== undefined
       ? Effect.succeed(cached)
-      : functions
-          .getFunction({
+      : Effect.gen(function* () {
+          const environmentName = environmentOf(target.environment);
+          const found = yield* functions.getFunction({
             appName: target.app,
             objectTag: tag,
-            environmentName: environmentOf(target.environment),
-          })
-          .pipe(
-            Effect.map((response) => response.functionId ?? ""),
-            Effect.tap((id) => Effect.sync(() => (cached = id))),
-          ),
+            environmentName,
+          });
+          let id = found.functionId ?? "";
+          // A parameterized class runs a bound function per parameter set.
+          if (target.parameters !== undefined) {
+            const schema = found.handleMetadata?.classParameterInfo?.schema ?? [];
+            const serializedParams = yield* serializeParameters(schema, target.parameters);
+            const bound = yield* functions.functionBindParams({
+              functionId: id,
+              serializedParams,
+              environmentName,
+            });
+            id = bound.boundFunctionId ?? id;
+          }
+          cached = id;
+          return id;
+        }),
   );
   return { functionId, method } satisfies ResolvedFunction;
 });
