@@ -11,12 +11,13 @@ import {
   restoreSandbox,
   sandboxFromName,
   sandboxHandle,
+  type RawSandboxHandle,
   type SandboxHandle,
   type SandboxTarget,
 } from "./SandboxClient.ts";
 
 /** Run every method of a handle with the binding's credentials. */
-export const withClient = (handle: SandboxHandle, client: ModalClient): SandboxHandle => {
+export const withClient = (handle: RawSandboxHandle, client: ModalClient): SandboxHandle => {
   const wrapped: Record<string, unknown> = { sandboxId: handle.sandboxId };
   for (const [key, value] of Object.entries(handle)) {
     if (typeof value === "function") {

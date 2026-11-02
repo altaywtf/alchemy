@@ -2,6 +2,7 @@ import * as container from "@distilled.cloud/modal/container";
 import { withTaskCommandRouter } from "@distilled.cloud/modal/Credentials";
 import * as sandbox from "@distilled.cloud/modal/sandbox";
 import * as router from "@distilled.cloud/modal/task_command_router";
+import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { buildImage, gpuConfig, type ImageBuildSpec } from "./ImageBuild.ts";
@@ -165,24 +166,24 @@ export interface SandboxTunnel {
 }
 
 /** A running (or finished) Modal sandbox. Every method calls Modal's API. */
-export interface SandboxHandle {
+export interface SandboxHandleOf<R> {
   readonly sandboxId: string;
   /** Run a command (an argument vector, no shell) and wait for it. */
-  exec(command: ReadonlyArray<string>, options?: ExecOptions): Effect.Effect<ExecResult, any, any>;
+  exec(command: ReadonlyArray<string>, options?: ExecOptions): Effect.Effect<ExecResult, any, R>;
   /** Read a file. */
-  readFile(path: string): Effect.Effect<Uint8Array, any, any>;
+  readFile(path: string): Effect.Effect<Uint8Array, any, R>;
   /** Read a UTF-8 file. */
-  readFileString(path: string): Effect.Effect<string, any, any>;
+  readFileString(path: string): Effect.Effect<string, any, R>;
   /** Write (create or truncate) a file. */
-  writeFile(path: string, data: string | Uint8Array): Effect.Effect<void, any, any>;
+  writeFile(path: string, data: string | Uint8Array): Effect.Effect<void, any, R>;
   /** List a directory. */
-  listFiles(path: string): Effect.Effect<ReadonlyArray<SandboxFileEntry>, any, any>;
+  listFiles(path: string): Effect.Effect<ReadonlyArray<SandboxFileEntry>, any, R>;
   /** Create a directory (and its parents). */
-  mkdir(path: string): Effect.Effect<void, any, any>;
+  mkdir(path: string): Effect.Effect<void, any, R>;
   /** Remove a file or directory. */
-  remove(path: string, options?: { readonly recursive?: boolean }): Effect.Effect<void, any, any>;
+  remove(path: string, options?: { readonly recursive?: boolean }): Effect.Effect<void, any, R>;
   /** Tunnels to the sandbox's open ports, by container port. */
-  tunnels(timeout?: DurationInput): Effect.Effect<Record<number, SandboxTunnel>, any, any>;
+  tunnels(timeout?: DurationInput): Effect.Effect<Record<number, SandboxTunnel>, any, R>;
   /**
    * A token-authenticated URL for one port, for a browser or client that
    * shouldn't hold Modal credentials.
@@ -190,41 +191,42 @@ export interface SandboxHandle {
   connectToken(options?: {
     readonly port?: number;
     readonly userMetadata?: string;
-  }): Effect.Effect<{ readonly url: string; readonly token: string }, any, any>;
+  }): Effect.Effect<{ readonly url: string; readonly token: string }, any, R>;
   /** Capture the filesystem as a new image (usable as `image` later). */
-  snapshotFilesystem(
-    timeout?: DurationInput,
-  ): Effect.Effect<{ readonly imageId: string }, any, any>;
+  snapshotFilesystem(timeout?: DurationInput): Effect.Effect<{ readonly imageId: string }, any, R>;
   /** Capture memory and filesystem (needs `enableSnapshot`); restore with `restore`. */
-  snapshotMemory(): Effect.Effect<{ readonly snapshotId: string }, any, any>;
+  snapshotMemory(): Effect.Effect<{ readonly snapshotId: string }, any, R>;
   /** Capture one directory as an image (mount it into another sandbox with `mountDirectory`). */
-  snapshotDirectory(path: string): Effect.Effect<{ readonly imageId: string }, any, any>;
+  snapshotDirectory(path: string): Effect.Effect<{ readonly imageId: string }, any, R>;
   /** Mount a directory snapshot at `path`. */
-  mountDirectory(
-    path: string,
-    snapshot: { readonly imageId: string },
-  ): Effect.Effect<void, any, any>;
+  mountDirectory(path: string, snapshot: { readonly imageId: string }): Effect.Effect<void, any, R>;
   /** Replace the sandbox's outbound network policy while it runs. */
   setNetworkAccess(access: {
     readonly blockNetwork?: boolean;
     readonly cidrAllowlist?: ReadonlyArray<string>;
     readonly allowedDomains?: ReadonlyArray<string>;
-  }): Effect.Effect<void, any, any>;
+  }): Effect.Effect<void, any, R>;
   /** Replace the outbound header injection rules while it runs. */
   setOutboundPolicy(policy: {
     readonly headerReplacements: ReadonlyArray<HeaderReplacement>;
-  }): Effect.Effect<void, any, any>;
+  }): Effect.Effect<void, any, R>;
   /** Replace the sandbox's tags. */
-  setTags(tags: Record<string, string>): Effect.Effect<void, any, any>;
+  setTags(tags: Record<string, string>): Effect.Effect<void, any, R>;
   /** The main process's output so far. */
-  logs(options?: { readonly timeout?: DurationInput }): Effect.Effect<string, any, any>;
+  logs(options?: { readonly timeout?: DurationInput }): Effect.Effect<string, any, R>;
   /** Wait for the sandbox to finish; `undefined` exit code while still running. */
   wait(
     timeout?: DurationInput,
-  ): Effect.Effect<{ readonly exitCode?: number; readonly status: string }, any, any>;
+  ): Effect.Effect<{ readonly exitCode?: number; readonly status: string }, any, R>;
   /** Terminate the sandbox (no-op when it already finished). */
-  terminate(): Effect.Effect<void, any, any>;
+  terminate(): Effect.Effect<void, any, R>;
 }
+
+/** A sandbox handle as bindings return it: calls run inside a deployed runtime. */
+export type SandboxHandle = SandboxHandleOf<RuntimeContext>;
+
+/** A sandbox handle whose calls need Modal credentials and an HTTP client. */
+export type RawSandboxHandle = SandboxHandleOf<any>;
 
 /** Where a sandbox client creates sandboxes. */
 export interface SandboxTarget {
@@ -367,7 +369,7 @@ export const resolveSandboxImage = Effect.fn(function* (
 export const sandboxHandle = (
   sandboxId: string,
   target: Pick<SandboxTarget, "environment">,
-): SandboxHandle => {
+): RawSandboxHandle => {
   let cachedTaskId: string | undefined;
   const taskId = Effect.gen(function* () {
     if (cachedTaskId !== undefined) return cachedTaskId;
@@ -451,7 +453,7 @@ export const sandboxHandle = (
     );
   });
 
-  const handle: SandboxHandle = {
+  const handle: RawSandboxHandle = {
     sandboxId,
     exec: Effect.fn(function* (command, options = {}) {
       const id = yield* taskId;

@@ -28,21 +28,21 @@ export interface SandboxesClient {
   /** The App sandboxes are created in. */
   readonly appId: Effect.Effect<string>;
   /** Create a sandbox. Modal's own sandbox parameters; the bound image is the default `image`. */
-  create(options?: SandboxCreateOptions): Effect.Effect<SandboxHandle, any>;
+  create(options?: SandboxCreateOptions): Effect.Effect<SandboxHandle, any, RuntimeContext>;
   /** A running sandbox by name, or `undefined`. */
-  fromName(name: string): Effect.Effect<SandboxHandle | undefined, any>;
+  fromName(name: string): Effect.Effect<SandboxHandle | undefined, any, RuntimeContext>;
   /** A sandbox by id. */
   fromId(sandboxId: string): Effect.Effect<SandboxHandle>;
   /** Running sandboxes of the App, optionally filtered by tags. */
   list(options?: {
     readonly tags?: Record<string, string>;
     readonly includeFinished?: boolean;
-  }): Effect.Effect<ReadonlyArray<SandboxSummary>, any>;
+  }): Effect.Effect<ReadonlyArray<SandboxSummary>, any, RuntimeContext>;
   /** Start a new sandbox from a memory snapshot (`handle.snapshotMemory()`). */
   restore(
     snapshot: { readonly snapshotId: string },
     options?: { readonly name?: string },
-  ): Effect.Effect<SandboxHandle, any>;
+  ): Effect.Effect<SandboxHandle, any, RuntimeContext>;
 }
 
 /**
@@ -121,7 +121,7 @@ export interface SandboxesClient {
 export interface CreateSandbox extends Binding.Service<
   CreateSandbox,
   "Modal.CreateSandbox",
-  (target: App | Image) => Effect.Effect<SandboxesClient, never, RuntimeContext>
+  (target: App | Image) => Effect.Effect<SandboxesClient>
 > {}
 
 export const CreateSandbox = Binding.Service<CreateSandbox>("Modal.CreateSandbox");

@@ -33,19 +33,19 @@ export interface FunctionClient {
     args?: ReadonlyArray<unknown>,
     kwargs?: Record<string, unknown>,
     options?: { readonly timeout?: number | string },
-  ): Effect.Effect<A, any>;
+  ): Effect.Effect<A, any, RuntimeContext>;
   /** Start a call without waiting; read it later with {@link result}. */
   spawn(
     args?: ReadonlyArray<unknown>,
     kwargs?: Record<string, unknown>,
-  ): Effect.Effect<{ readonly functionCallId: string }, any>;
+  ): Effect.Effect<{ readonly functionCallId: string }, any, RuntimeContext>;
   /** The result of a spawned call, waiting up to `timeout`. */
   result<A = unknown>(
     call: { readonly functionCallId: string },
     options?: { readonly timeout?: number | string },
-  ): Effect.Effect<A, any>;
+  ): Effect.Effect<A, any, RuntimeContext>;
   /** Cancel a spawned call. */
-  cancel(call: { readonly functionCallId: string }): Effect.Effect<void, any>;
+  cancel(call: { readonly functionCallId: string }): Effect.Effect<void, any, RuntimeContext>;
 }
 
 /**
@@ -93,7 +93,7 @@ export interface FunctionClient {
 export interface InvokeFunction extends Binding.Service<
   InvokeFunction,
   "Modal.InvokeFunction",
-  (target: FunctionRef) => Effect.Effect<FunctionClient, never, RuntimeContext>
+  (target: FunctionRef) => Effect.Effect<FunctionClient>
 > {}
 
 export const InvokeFunction = Binding.Service<InvokeFunction>("Modal.InvokeFunction");

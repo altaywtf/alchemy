@@ -39,7 +39,7 @@ export type { WriteDictClient } from "./DictClient.ts";
 export interface WriteDict extends Binding.Service<
   WriteDict,
   "Modal.WriteDict",
-  (dict: Dict) => Effect.Effect<WriteDictClient, never, RuntimeContext>
+  (dict: Dict) => Effect.Effect<WriteDictClient>
 > {}
 
 export const WriteDict = Binding.Service<WriteDict>("Modal.WriteDict");

@@ -114,19 +114,29 @@ export const makeFunctionClient = (ref: FunctionRef, client: ModalClient): Funct
   });
 
   return {
-    call: (args = [], kwargs = {}, options = {}) =>
+    call: <A>(
+      args: ReadonlyArray<unknown> = [],
+      kwargs: Record<string, unknown> = {},
+      options: { readonly timeout?: number | string } = {},
+    ) =>
       client(
         start(args, kwargs, "FUNCTION_CALL_INVOCATION_TYPE_SYNC").pipe(
           Effect.flatMap((id) => result(id, options.timeout)),
+          // CBOR results are untyped; the caller names the shape it expects.
+          Effect.map((value) => value as A),
         ),
-      ) as any,
+      ),
     spawn: (args = [], kwargs = {}) =>
       client(
         start(args, kwargs, "FUNCTION_CALL_INVOCATION_TYPE_ASYNC").pipe(
           Effect.map((functionCallId) => ({ functionCallId })),
         ),
       ),
-    result: (call, options = {}) => client(result(call.functionCallId, options.timeout)) as any,
+    result: <A>(
+      call: { readonly functionCallId: string },
+      options: { readonly timeout?: number | string } = {},
+    ) =>
+      client(result(call.functionCallId, options.timeout)).pipe(Effect.map((value) => value as A)),
     cancel: (call) =>
       client(
         functions.cancelFunctionCall({ functionCallId: call.functionCallId }).pipe(

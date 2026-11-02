@@ -1,0 +1,152 @@
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Modal from "@alchemy.run/modal";
+import * as Effect from "effect/Effect";
+import { HttpServerRequest } from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as Layer from "effect/Layer";
+import { Agents, Base, Coder, Jobs, Results, Token, Workspace } from "./resources.ts";
+
+const BindingsLive = Layer.mergeAll(
+  Modal.ReadWriteVolumeHttp,
+  Modal.ReadVolumeHttp,
+  Modal.WriteVolumeHttp,
+  Modal.ReadWriteDictHttp,
+  Modal.ReadDictHttp,
+  Modal.WriteDictHttp,
+  Modal.ReadWriteQueueHttp,
+  Modal.ReadQueueHttp,
+  Modal.WriteQueueHttp,
+  Modal.WriteSecretHttp,
+  Modal.CreateSandboxHttp,
+  Modal.CreateImageHttp,
+  Modal.CreateVolumeHttp,
+  Modal.CreateDictHttp,
+  Modal.CreateQueueHttp,
+  Modal.CreateSecretHttp,
+);
+
+/** A Cloudflare Worker (a host outside Modal) driving every Modal binding. */
+export default class ModalWorker extends Cloudflare.Worker<ModalWorker>()(
+  "ModalWorker",
+  { main: import.meta.url, compatibility: { flags: ["nodejs_compat"] } },
+  Effect.gen(function* () {
+    const volume = yield* Modal.ReadWriteVolume(Workspace);
+    const readVolume = yield* Modal.ReadVolume(Workspace);
+    const writeVolume = yield* Modal.WriteVolume(Workspace);
+    const dict = yield* Modal.ReadWriteDict(Results);
+    const readDict = yield* Modal.ReadDict(Results);
+    const writeDict = yield* Modal.WriteDict(Results);
+    const queue = yield* Modal.ReadWriteQueue(Jobs);
+    const readQueue = yield* Modal.ReadQueue(Jobs);
+    const writeQueue = yield* Modal.WriteQueue(Jobs);
+    const secret = yield* Modal.WriteSecret(Token);
+    const sandboxes = yield* Modal.CreateSandbox(Base);
+    const appSandboxes = yield* Modal.CreateSandbox(Coder);
+    const images = yield* Modal.CreateImage(Coder);
+    const volumes = yield* Modal.CreateVolume(Agents);
+    const dicts = yield* Modal.CreateDict(Agents);
+    const queues = yield* Modal.CreateQueue(Agents);
+    const secrets = yield* Modal.CreateSecret(Agents);
+
+    return {
+      fetch: Effect.gen(function* () {
+        const request = yield* HttpServerRequest;
+        const url = new URL(request.url, "http://worker");
+        const key = url.searchParams.get("key") ?? "k";
+        switch (url.pathname) {
+          case "/volume": {
+            yield* writeVolume.writeFile(`/${key}.txt`, `hello ${key}`);
+            const text = yield* readVolume.readFileString(`/${key}.txt`);
+            yield* volume.copyFiles([`/${key}.txt`], `/${key}-copy.txt`);
+            const files = yield* volume.listFiles("/");
+            yield* volume.removeFile(`/${key}-copy.txt`);
+            return yield* HttpServerResponse.json({ text, files: files.map((f) => f.path) });
+          }
+          case "/dict": {
+            yield* writeDict.put(key, { n: 1 });
+            const value = yield* readDict.get(key);
+            const contains = yield* readDict.contains(key);
+            const popped = yield* dict.pop(key);
+            const after = yield* dict.contains(key);
+            return yield* HttpServerResponse.json({ value, contains, popped, after });
+          }
+          case "/queue": {
+            yield* writeQueue.putMany([{ i: 1 }, { i: 2 }], { partition: key });
+            const len = yield* readQueue.len({ partition: key });
+            const taken = yield* queue.take({ partition: key, count: 2, timeout: 5 });
+            return yield* HttpServerResponse.json({ len, taken });
+          }
+          case "/secret": {
+            yield* secret.put({ TOKEN: `rotated-${key}` });
+            return yield* HttpServerResponse.json({ ok: true });
+          }
+          case "/sandbox": {
+            const sandbox = yield* sandboxes.create({ timeout: "5 minutes", tags: { test: key } });
+            const result = yield* sandbox
+              .exec(["cat", "/ready.txt"])
+              .pipe(Effect.ensuring(Effect.ignore(sandbox.terminate())));
+            return yield* HttpServerResponse.json(result);
+          }
+          case "/sandbox-files": {
+            const sandbox = yield* appSandboxes.create({
+              image: "debian:bookworm-slim",
+              timeout: "5 minutes",
+            });
+            const out = yield* Effect.gen(function* () {
+              yield* sandbox.writeFile("/tmp/x.txt", "written");
+              const read = yield* sandbox.readFileString("/tmp/x.txt");
+              const snapshot = yield* sandbox.snapshotFilesystem();
+              return { read, snapshot: snapshot.imageId };
+            }).pipe(Effect.ensuring(Effect.ignore(sandbox.terminate())));
+            return yield* HttpServerResponse.json(out);
+          }
+          case "/sandbox-named": {
+            const name = `named-${key}`;
+            const created = yield* appSandboxes.create({
+              image: "debian:bookworm-slim",
+              name,
+              timeout: "5 minutes",
+            });
+            const found = yield* appSandboxes.fromName(name);
+            yield* created.terminate();
+            return yield* HttpServerResponse.json({
+              created: created.sandboxId,
+              found: found?.sandboxId,
+            });
+          }
+          case "/image": {
+            const image = yield* images.build({
+              image: "debian:bookworm-slim",
+              commands: ["COPY hello.txt /hello.txt"],
+              files: { "hello.txt": `hello ${key}` },
+            });
+            return yield* HttpServerResponse.json(image);
+          }
+          case "/open": {
+            const v = yield* volumes.getOrCreate(`open-${key}`);
+            yield* v.writeFile("/a.txt", "a");
+            const d = yield* dicts.getOrCreate(`open-${key}`);
+            yield* d.put("a", 1);
+            const q = yield* queues.getOrCreate(`open-${key}`);
+            yield* q.put("a");
+            const s = yield* secrets.put(`open-${key}`, { A: "1" });
+            const listed = {
+              volumes: (yield* volumes.list()).includes(`open-${key}`),
+              dicts: (yield* dicts.list()).includes(`open-${key}`),
+              queues: (yield* queues.list()).includes(`open-${key}`),
+              secrets: (yield* secrets.list()).includes(`open-${key}`),
+            };
+            yield* volumes.delete(`open-${key}`);
+            yield* dicts.delete(`open-${key}`);
+            yield* queues.delete(`open-${key}`);
+            yield* secrets.delete(`open-${key}`);
+            const gone = (yield* volumes.get(`open-${key}`)) === undefined;
+            return yield* HttpServerResponse.json({ listed, keys: s.keys, gone });
+          }
+          default:
+            return HttpServerResponse.text("ok");
+        }
+      }).pipe(Effect.orDie),
+    };
+  }).pipe(Effect.provide(BindingsLive)),
+) {}

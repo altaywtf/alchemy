@@ -39,7 +39,7 @@ export type { WriteQueueClient } from "./QueueClient.ts";
 export interface WriteQueue extends Binding.Service<
   WriteQueue,
   "Modal.WriteQueue",
-  (queue: Queue) => Effect.Effect<WriteQueueClient, never, RuntimeContext>
+  (queue: Queue) => Effect.Effect<WriteQueueClient>
 > {}
 
 export const WriteQueue = Binding.Service<WriteQueue>("Modal.WriteQueue");

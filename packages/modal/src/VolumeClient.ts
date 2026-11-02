@@ -1,3 +1,4 @@
+import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Effect from "effect/Effect";
 import type { ModalClient } from "./ModalBindings.ts";
 import {
@@ -14,14 +15,14 @@ export interface ReadVolumeClient {
   /** The volume's id. */
   readonly volumeId: Effect.Effect<string>;
   /** Read a file. */
-  readFile(path: string): Effect.Effect<Uint8Array, any>;
+  readFile(path: string): Effect.Effect<Uint8Array, any, RuntimeContext>;
   /** Read a UTF-8 file. */
-  readFileString(path: string): Effect.Effect<string, any>;
+  readFileString(path: string): Effect.Effect<string, any, RuntimeContext>;
   /** List a directory (`recursive` walks it). */
   listFiles(
     path: string,
     options?: { readonly recursive?: boolean },
-  ): Effect.Effect<ReadonlyArray<VolumeFileEntry>, any>;
+  ): Effect.Effect<ReadonlyArray<VolumeFileEntry>, any, RuntimeContext>;
 }
 
 /** Write access to one volume's files. */
@@ -33,15 +34,18 @@ export interface WriteVolumeClient {
     path: string,
     data: string | Uint8Array,
     options?: { readonly mode?: number },
-  ): Effect.Effect<void, any>;
+  ): Effect.Effect<void, any, RuntimeContext>;
   /** Remove a file, or a directory with `recursive`. */
-  removeFile(path: string, options?: { readonly recursive?: boolean }): Effect.Effect<void, any>;
+  removeFile(
+    path: string,
+    options?: { readonly recursive?: boolean },
+  ): Effect.Effect<void, any, RuntimeContext>;
   /** Copy files to `destination` inside the volume. */
   copyFiles(
     sources: ReadonlyArray<string>,
     destination: string,
     options?: { readonly recursive?: boolean },
-  ): Effect.Effect<void, any>;
+  ): Effect.Effect<void, any, RuntimeContext>;
 }
 
 /** Read and write access to one volume's files. */

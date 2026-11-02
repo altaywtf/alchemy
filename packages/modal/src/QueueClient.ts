@@ -1,4 +1,5 @@
 import * as queue from "@distilled.cloud/modal/queue";
+import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Effect from "effect/Effect";
 import { decodeJson, encodeJson } from "./BindingHttp.ts";
 import { seconds } from "./internal.ts";
@@ -24,11 +25,15 @@ export interface ReadQueueClient {
       readonly count?: number;
       readonly timeout?: number | string;
     },
-  ): Effect.Effect<ReadonlyArray<A>, any>;
+  ): Effect.Effect<ReadonlyArray<A>, any, RuntimeContext>;
   /** Items currently in the queue, without removing them. */
-  peek<A = unknown>(options?: QueuePartitionOptions): Effect.Effect<ReadonlyArray<A>, any>;
+  peek<A = unknown>(
+    options?: QueuePartitionOptions,
+  ): Effect.Effect<ReadonlyArray<A>, any, RuntimeContext>;
   /** Number of items in a partition (or, with `total`, in every partition). */
-  len(options?: QueuePartitionOptions & { readonly total?: boolean }): Effect.Effect<number, any>;
+  len(
+    options?: QueuePartitionOptions & { readonly total?: boolean },
+  ): Effect.Effect<number, any, RuntimeContext>;
 }
 
 /** Put items into one queue. */
@@ -38,14 +43,16 @@ export interface WriteQueueClient {
   put(
     value: unknown,
     options?: QueuePartitionOptions & { readonly partitionTtl?: number | string },
-  ): Effect.Effect<void, any>;
+  ): Effect.Effect<void, any, RuntimeContext>;
   /** Append many items in order. */
   putMany(
     values: Iterable<unknown>,
     options?: QueuePartitionOptions & { readonly partitionTtl?: number | string },
-  ): Effect.Effect<void, any>;
+  ): Effect.Effect<void, any, RuntimeContext>;
   /** Remove every item of a partition (or of all partitions). */
-  clear(options?: QueuePartitionOptions & { readonly all?: boolean }): Effect.Effect<void, any>;
+  clear(
+    options?: QueuePartitionOptions & { readonly all?: boolean },
+  ): Effect.Effect<void, any, RuntimeContext>;
 }
 
 /** Put and take items. */
@@ -56,7 +63,7 @@ export const makeReadQueueClient = (
   client: ModalClient,
 ): ReadQueueClient => ({
   queueId,
-  take: (options = {}) =>
+  take: <A>(options: Parameters<ReadQueueClient["take"]>[0] = {}) =>
     client(
       Effect.gen(function* () {
         const { values } = yield* queue.getQueue({
@@ -65,10 +72,10 @@ export const makeReadQueueClient = (
           nValues: options.count ?? 1,
           timeout: seconds(options.timeout) ?? 0,
         });
-        return yield* Effect.forEach(values ?? [], (value) => decodeJson(value));
+        return yield* Effect.forEach(values ?? [], (value) => decodeJson<A>(value));
       }),
-    ) as any,
-  peek: (options = {}) =>
+    ),
+  peek: <A>(options: QueuePartitionOptions = {}) =>
     client(
       Effect.gen(function* () {
         const { items } = yield* queue.queueNextItems({
@@ -76,9 +83,9 @@ export const makeReadQueueClient = (
           partitionKey: options.partition,
           itemPollTimeout: 0,
         });
-        return yield* Effect.forEach(items ?? [], (item) => decodeJson(item.value ?? ""));
+        return yield* Effect.forEach(items ?? [], (item) => decodeJson<A>(item.value ?? ""));
       }),
-    ) as any,
+    ),
   len: (options = {}) =>
     client(
       Effect.gen(function* () {

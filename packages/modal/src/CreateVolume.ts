@@ -16,13 +16,13 @@ export interface VolumeHandle extends ReadWriteVolumeClient {
 /** Get, create, list and delete volumes by name in one environment. */
 export interface VolumesClient {
   /** The volume named `name`, created when missing (Modal's own get-or-create). */
-  getOrCreate(name: string): Effect.Effect<VolumeHandle, any>;
+  getOrCreate(name: string): Effect.Effect<VolumeHandle, any, RuntimeContext>;
   /** The volume named `name`, or `undefined`. */
-  get(name: string): Effect.Effect<VolumeHandle | undefined, any>;
+  get(name: string): Effect.Effect<VolumeHandle | undefined, any, RuntimeContext>;
   /** Delete the volume named `name` (no-op when missing). */
-  delete(name: string): Effect.Effect<void, any>;
+  delete(name: string): Effect.Effect<void, any, RuntimeContext>;
   /** Names of every volume in the environment. */
-  list(): Effect.Effect<ReadonlyArray<string>, any>;
+  list(): Effect.Effect<ReadonlyArray<string>, any, RuntimeContext>;
 }
 
 /**
@@ -71,7 +71,7 @@ export interface VolumesClient {
 export interface CreateVolume extends Binding.Service<
   CreateVolume,
   "Modal.CreateVolume",
-  (environment?: Environment) => Effect.Effect<VolumesClient, never, RuntimeContext>
+  (environment?: Environment) => Effect.Effect<VolumesClient>
 > {}
 
 export const CreateVolume = Binding.Service<CreateVolume>("Modal.CreateVolume");

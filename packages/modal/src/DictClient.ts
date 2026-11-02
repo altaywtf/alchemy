@@ -1,4 +1,5 @@
 import * as dict from "@distilled.cloud/modal/dict";
+import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Effect from "effect/Effect";
 import { decodeJson, encodeJson } from "./BindingHttp.ts";
 import type { ModalClient } from "./ModalBindings.ts";
@@ -11,13 +12,13 @@ import type { ModalClient } from "./ModalBindings.ts";
 export interface ReadDictClient {
   readonly dictId: Effect.Effect<string>;
   /** The value under `key`, or `undefined`. */
-  get<A = unknown>(key: unknown): Effect.Effect<A | undefined, any>;
+  get<A = unknown>(key: unknown): Effect.Effect<A | undefined, any, RuntimeContext>;
   /** Whether `key` is present. */
-  contains(key: unknown): Effect.Effect<boolean, any>;
+  contains(key: unknown): Effect.Effect<boolean, any, RuntimeContext>;
   /** Number of entries. */
-  len(): Effect.Effect<number, any>;
+  len(): Effect.Effect<number, any, RuntimeContext>;
   /** Every entry. */
-  entries<A = unknown>(): Effect.Effect<ReadonlyArray<readonly [unknown, A]>, any>;
+  entries<A = unknown>(): Effect.Effect<ReadonlyArray<readonly [unknown, A]>, any, RuntimeContext>;
 }
 
 /** Write access to one dict. */
@@ -28,13 +29,13 @@ export interface WriteDictClient {
     key: unknown,
     value: unknown,
     options?: { readonly ifNotExists?: boolean },
-  ): Effect.Effect<boolean, any>;
+  ): Effect.Effect<boolean, any, RuntimeContext>;
   /** Set many entries at once. */
-  update(entries: Iterable<readonly [unknown, unknown]>): Effect.Effect<void, any>;
+  update(entries: Iterable<readonly [unknown, unknown]>): Effect.Effect<void, any, RuntimeContext>;
   /** Remove `key` and return its value, or `undefined`. */
-  pop<A = unknown>(key: unknown): Effect.Effect<A | undefined, any>;
+  pop<A = unknown>(key: unknown): Effect.Effect<A | undefined, any, RuntimeContext>;
   /** Remove every entry. */
-  clear(): Effect.Effect<void, any>;
+  clear(): Effect.Effect<void, any, RuntimeContext>;
 }
 
 /** Read and write access to one dict. */
@@ -45,7 +46,7 @@ export const makeReadDictClient = (
   client: ModalClient,
 ): ReadDictClient => ({
   dictId,
-  get: (key) =>
+  get: <A>(key: unknown) =>
     client(
       Effect.gen(function* () {
         const response = yield* dict.getDict({
@@ -53,10 +54,10 @@ export const makeReadDictClient = (
           key: yield* encodeJson(key),
         });
         return response.found && response.value !== undefined
-          ? yield* decodeJson(response.value)
+          ? yield* decodeJson<A>(response.value)
           : undefined;
       }),
-    ) as any,
+    ),
   contains: (key) =>
     client(
       Effect.gen(function* () {
@@ -74,7 +75,7 @@ export const makeReadDictClient = (
         return response.len ?? 0;
       }),
     ),
-  entries: () =>
+  entries: <A>() =>
     client(
       Effect.gen(function* () {
         const { items } = yield* dict.dictContents({
@@ -83,10 +84,10 @@ export const makeReadDictClient = (
           values: true,
         });
         return yield* Effect.forEach(items, (entry) =>
-          Effect.all([decodeJson(entry.key ?? ""), decodeJson(entry.value ?? "")] as const),
+          Effect.all([decodeJson(entry.key ?? ""), decodeJson<A>(entry.value ?? "")] as const),
         );
       }),
-    ) as any,
+    ),
 });
 
 export const makeWriteDictClient = (
@@ -114,7 +115,7 @@ export const makeWriteDictClient = (
         yield* dict.updateDict({ dictId: yield* dictId, updates });
       }),
     ),
-  pop: (key) =>
+  pop: <A>(key: unknown) =>
     client(
       Effect.gen(function* () {
         const response = yield* dict.dictPop({
@@ -122,10 +123,10 @@ export const makeWriteDictClient = (
           key: yield* encodeJson(key),
         });
         return response.found && response.value !== undefined
-          ? yield* decodeJson(response.value)
+          ? yield* decodeJson<A>(response.value)
           : undefined;
       }),
-    ) as any,
+    ),
   clear: () =>
     client(
       Effect.gen(function* () {

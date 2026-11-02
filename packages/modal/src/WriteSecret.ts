@@ -11,7 +11,9 @@ export interface WriteSecretClient {
    * Replace the secret's whole variable set. Sandboxes and functions started
    * afterwards see the new values; running ones keep theirs.
    */
-  put(env: Record<string, string | Redacted.Redacted<string>>): Effect.Effect<void, any>;
+  put(
+    env: Record<string, string | Redacted.Redacted<string>>,
+  ): Effect.Effect<void, any, RuntimeContext>;
 }
 
 /**
@@ -50,7 +52,7 @@ export interface WriteSecretClient {
 export interface WriteSecret extends Binding.Service<
   WriteSecret,
   "Modal.WriteSecret",
-  (secret: Secret) => Effect.Effect<WriteSecretClient, never, RuntimeContext>
+  (secret: Secret) => Effect.Effect<WriteSecretClient>
 > {}
 
 export const WriteSecret = Binding.Service<WriteSecret>("Modal.WriteSecret");

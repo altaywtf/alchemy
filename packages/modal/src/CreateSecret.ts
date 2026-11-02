@@ -15,13 +15,13 @@ export interface SecretsClient {
   put(
     name: string,
     env: Record<string, string | Redacted.Redacted<string>>,
-  ): Effect.Effect<SecretAttributes, any>;
+  ): Effect.Effect<SecretAttributes, any, RuntimeContext>;
   /** The secret named `name` (its variable names, never its values), or `undefined`. */
-  get(name: string): Effect.Effect<SecretAttributes | undefined, any>;
+  get(name: string): Effect.Effect<SecretAttributes | undefined, any, RuntimeContext>;
   /** Delete the secret named `name` (no-op when missing). */
-  delete(name: string): Effect.Effect<void, any>;
+  delete(name: string): Effect.Effect<void, any, RuntimeContext>;
   /** Names of every secret in the environment. */
-  list(): Effect.Effect<ReadonlyArray<string>, any>;
+  list(): Effect.Effect<ReadonlyArray<string>, any, RuntimeContext>;
 }
 
 /**
@@ -78,7 +78,7 @@ export interface SecretsClient {
 export interface CreateSecret extends Binding.Service<
   CreateSecret,
   "Modal.CreateSecret",
-  (environment?: Environment) => Effect.Effect<SecretsClient, never, RuntimeContext>
+  (environment?: Environment) => Effect.Effect<SecretsClient>
 > {}
 
 export const CreateSecret = Binding.Service<CreateSecret>("Modal.CreateSecret");

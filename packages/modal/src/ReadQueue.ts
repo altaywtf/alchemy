@@ -39,7 +39,7 @@ export type { ReadQueueClient } from "./QueueClient.ts";
 export interface ReadQueue extends Binding.Service<
   ReadQueue,
   "Modal.ReadQueue",
-  (queue: Queue) => Effect.Effect<ReadQueueClient, never, RuntimeContext>
+  (queue: Queue) => Effect.Effect<ReadQueueClient>
 > {}
 
 export const ReadQueue = Binding.Service<ReadQueue>("Modal.ReadQueue");

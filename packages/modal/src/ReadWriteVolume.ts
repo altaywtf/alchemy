@@ -40,7 +40,7 @@ export type { ReadWriteVolumeClient } from "./VolumeClient.ts";
 export interface ReadWriteVolume extends Binding.Service<
   ReadWriteVolume,
   "Modal.ReadWriteVolume",
-  (volume: Volume) => Effect.Effect<ReadWriteVolumeClient, never, RuntimeContext>
+  (volume: Volume) => Effect.Effect<ReadWriteVolumeClient>
 > {}
 
 export const ReadWriteVolume = Binding.Service<ReadWriteVolume>("Modal.ReadWriteVolume");

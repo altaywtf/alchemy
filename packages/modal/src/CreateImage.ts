@@ -29,9 +29,11 @@ export interface ImagesClient {
    * Build an image (or return the cached one: Modal content-addresses
    * builds) and wait until it's ready. Fails with `Modal.ImageBuildFailed`.
    */
-  build(options: ImageBuildOptions): Effect.Effect<{ readonly imageId: string }, any>;
+  build(
+    options: ImageBuildOptions,
+  ): Effect.Effect<{ readonly imageId: string }, any, RuntimeContext>;
   /** Delete an image. */
-  delete(image: { readonly imageId: string }): Effect.Effect<void, any>;
+  delete(image: { readonly imageId: string }): Effect.Effect<void, any, RuntimeContext>;
 }
 
 /**
@@ -78,7 +80,7 @@ export interface ImagesClient {
 export interface CreateImage extends Binding.Service<
   CreateImage,
   "Modal.CreateImage",
-  (app: App) => Effect.Effect<ImagesClient, never, RuntimeContext>
+  (app: App) => Effect.Effect<ImagesClient>
 > {}
 
 export const CreateImage = Binding.Service<CreateImage>("Modal.CreateImage");

@@ -15,10 +15,7 @@ import * as ModalBindings from "./ModalBindings.ts";
 export const makeModalBinding = <Res extends ResourceLike, Client>(options: {
   /** Fully qualified binding tag, e.g. `Modal.WriteQueue`. */
   readonly tag: string;
-  readonly make: (
-    resource: Res,
-    client: ModalBindings.ModalClient,
-  ) => Effect.Effect<Client, never, any>;
+  readonly make: (resource: Res, client: ModalBindings.ModalClient) => Effect.Effect<Client>;
 }) =>
   Effect.gen(function* () {
     const client = yield* ModalBindings.Client;
@@ -37,10 +34,7 @@ export const makeModalBinding = <Res extends ResourceLike, Client>(options: {
  */
 export const makeOpenModalBinding = <Args extends ReadonlyArray<unknown>, Client>(options: {
   readonly tag: string;
-  readonly make: (
-    client: ModalBindings.ModalClient,
-    ...args: Args
-  ) => Effect.Effect<Client, never, any>;
+  readonly make: (client: ModalBindings.ModalClient, ...args: Args) => Effect.Effect<Client>;
 }) =>
   Effect.gen(function* () {
     const client = yield* ModalBindings.Client;

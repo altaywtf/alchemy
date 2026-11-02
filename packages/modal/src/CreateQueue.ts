@@ -16,13 +16,13 @@ export interface QueueHandle extends ReadWriteQueueClient {
 /** Get, create, list and delete queues by name in one environment. */
 export interface QueuesClient {
   /** The queue named `name`, created when missing (Modal's own get-or-create). */
-  getOrCreate(name: string): Effect.Effect<QueueHandle, any>;
+  getOrCreate(name: string): Effect.Effect<QueueHandle, any, RuntimeContext>;
   /** The queue named `name`, or `undefined`. */
-  get(name: string): Effect.Effect<QueueHandle | undefined, any>;
+  get(name: string): Effect.Effect<QueueHandle | undefined, any, RuntimeContext>;
   /** Delete the queue named `name` (no-op when missing). */
-  delete(name: string): Effect.Effect<void, any>;
+  delete(name: string): Effect.Effect<void, any, RuntimeContext>;
   /** Names of every queue in the environment. */
-  list(): Effect.Effect<ReadonlyArray<string>, any>;
+  list(): Effect.Effect<ReadonlyArray<string>, any, RuntimeContext>;
 }
 
 /**
@@ -70,7 +70,7 @@ export interface QueuesClient {
 export interface CreateQueue extends Binding.Service<
   CreateQueue,
   "Modal.CreateQueue",
-  (environment?: Environment) => Effect.Effect<QueuesClient, never, RuntimeContext>
+  (environment?: Environment) => Effect.Effect<QueuesClient>
 > {}
 
 export const CreateQueue = Binding.Service<CreateQueue>("Modal.CreateQueue");

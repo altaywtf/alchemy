@@ -16,13 +16,13 @@ export interface DictHandle extends ReadWriteDictClient {
 /** Get, create, list and delete dicts by name in one environment. */
 export interface DictsClient {
   /** The dict named `name`, created when missing (Modal's own get-or-create). */
-  getOrCreate(name: string): Effect.Effect<DictHandle, any>;
+  getOrCreate(name: string): Effect.Effect<DictHandle, any, RuntimeContext>;
   /** The dict named `name`, or `undefined`. */
-  get(name: string): Effect.Effect<DictHandle | undefined, any>;
+  get(name: string): Effect.Effect<DictHandle | undefined, any, RuntimeContext>;
   /** Delete the dict named `name` (no-op when missing). */
-  delete(name: string): Effect.Effect<void, any>;
+  delete(name: string): Effect.Effect<void, any, RuntimeContext>;
   /** Names of every dict in the environment. */
-  list(): Effect.Effect<ReadonlyArray<string>, any>;
+  list(): Effect.Effect<ReadonlyArray<string>, any, RuntimeContext>;
 }
 
 /**
@@ -70,7 +70,7 @@ export interface DictsClient {
 export interface CreateDict extends Binding.Service<
   CreateDict,
   "Modal.CreateDict",
-  (environment?: Environment) => Effect.Effect<DictsClient, never, RuntimeContext>
+  (environment?: Environment) => Effect.Effect<DictsClient>
 > {}
 
 export const CreateDict = Binding.Service<CreateDict>("Modal.CreateDict");
