@@ -44,7 +44,8 @@ export const WriteSecretHttp = Layer.effect(
   makeModalBinding({
     tag: "Modal.WriteSecret",
     make: Effect.fn(function* (resource: Secret, client) {
-      return makeWriteSecretClient(yield* resource.secretId, client);
+      const secretId = yield* resource.secretId;
+      return makeWriteSecretClient(secretId, client);
     }),
   }),
 );

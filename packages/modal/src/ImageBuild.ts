@@ -155,7 +155,10 @@ export const collectContextFiles = Effect.fn(function* (
       return;
     }
     const relative = path.relative(root, absolute).split(path.sep).join("/");
-    if (!files.has(relative)) files.set(relative, yield* fs.readFile(absolute));
+    if (!files.has(relative)) {
+      const data = yield* fs.readFile(absolute);
+      files.set(relative, data);
+    }
   });
   for (const instruction of instructions) {
     for (const source of copySources(instruction)) {

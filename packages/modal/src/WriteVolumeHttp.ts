@@ -18,7 +18,8 @@ export const WriteVolumeHttp = Layer.effect(
   makeModalBinding({
     tag: "Modal.WriteVolume",
     make: Effect.fn(function* (volume: Volume, client) {
-      return makeWriteVolumeClient(yield* volume.volumeId, client);
+      const volumeId = yield* volume.volumeId;
+      return makeWriteVolumeClient(volumeId, client);
     }),
   }),
 );

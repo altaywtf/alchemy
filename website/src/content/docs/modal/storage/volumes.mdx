@@ -1,0 +1,64 @@
+---
+title: Volumes
+description: Keep files on Modal volumes and read or write them without a sandbox.
+---
+
+## Create a volume
+
+```typescript
+// src/Storage.ts
+import * as Modal from "@alchemy.run/modal";
+
+export const Models = Modal.Volume("Models", {});
+```
+
+## Mount it in a sandbox
+
+```typescript
+const models = yield* Models;
+const sandbox = yield* sandboxes.create({ volumes: { "/models": models } });
+```
+
+## Read and write from a Worker
+
+Bind `ReadVolume`, `WriteVolume` or `ReadWriteVolume`:
+
+```typescript
+// src/Api.ts
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Modal from "@alchemy.run/modal";
+import * as Effect from "effect/Effect";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { Models } from "./Storage.ts";
+
+export default class Api extends Cloudflare.Worker<Api>()(
+  "Api",
+  { main: import.meta.url, compatibility: { flags: ["nodejs_compat"] } },
+  Effect.gen(function* () {
+    const models = yield* Modal.ReadWriteVolume(Models);
+    return {
+      fetch: Effect.gen(function* () {
+        yield* models.writeFile("/hello.txt", "hello");
+        const text = yield* models.readFileString("/hello.txt");
+        return HttpServerResponse.text(text);
+      }).pipe(Effect.orDie),
+    };
+  }).pipe(Effect.provide(Modal.ReadWriteVolumeHttp)),
+) {}
+```
+
+## List, copy and remove files
+
+```typescript
+const files = yield* models.listFiles("/", { recursive: true });
+yield* models.copyFiles(["/hello.txt"], "/backup/hello.txt");
+yield* models.removeFile("/backup", { recursive: true });
+```
+
+## One volume per user
+
+```typescript
+const volumes = yield* Modal.CreateVolume(Agents);
+const home = yield* volumes.getOrCreate(`home-${user}`);
+yield* home.writeFile("/notes.md", notes);
+```

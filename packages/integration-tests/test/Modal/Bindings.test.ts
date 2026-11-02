@@ -81,16 +81,15 @@ describe("ReadQueue / WriteQueue / ReadWriteQueue", () => {
 });
 
 describe("WriteSecret", () => {
-  test(
+  test.provider(
     "rotate a secret from a Worker",
-    Effect.gen(function* () {
-      yield* get("/secret?key=s1");
-      const { secretId } = yield* stack;
-      const { metadata } = yield* secret
-        .secretGetInfo({ secretId })
-        .pipe(Effect.provide(Modal.providers()));
-      expect(metadata?.keys).toEqual(["TOKEN"]);
-    }),
+    () =>
+      Effect.gen(function* () {
+        yield* get("/secret?key=s1");
+        const { secretId } = yield* stack;
+        const { metadata } = yield* secret.secretGetInfo({ secretId });
+        expect(metadata?.keys).toEqual(["TOKEN"]);
+      }),
     { tags: tags("secret"), timeout: 180_000 },
   );
 });

@@ -1,0 +1,68 @@
+---
+title: Sandboxes
+description: Create, find, run commands in, and stop Modal sandboxes from any runtime.
+---
+
+## Bind sandboxes
+
+`Modal.CreateSandbox` takes an image (sandboxes boot from it by default) or an app:
+
+```typescript
+const sandboxes = yield* Modal.CreateSandbox(Warm);
+```
+
+Provide `Modal.CreateSandboxHttp`. It writes your Modal token into the Worker; Modal tokens act on the whole workspace.
+
+## Create one per request
+
+```typescript
+const sandbox = yield* Effect.acquireRelease(
+  sandboxes.create({ timeout: "10 minutes" }),
+  (sandbox) => Effect.ignore(sandbox.terminate()),
+);
+```
+
+The sandbox stops when the request's scope closes.
+
+## Keep one per session
+
+```typescript
+const sandbox =
+  (yield* sandboxes.fromName(`session-${user}`)) ??
+  (yield* sandboxes.create({ name: `session-${user}`, idleTimeout: "10 minutes" }));
+```
+
+A name is unique among an app's running sandboxes. `idleTimeout` stops it once nobody uses it.
+
+## Run a command
+
+```typescript
+const result = yield* sandbox.exec(["pnpm", "test"], { workdir: "/work" });
+```
+
+`result` has `exitCode`, `stdout` and `stderr`.
+
+## Read and write files
+
+```typescript
+yield* sandbox.writeFile("/tmp/task.json", JSON.stringify(task));
+const report = yield* sandbox.readFileString("/tmp/report.json");
+```
+
+## Reach a port
+
+```typescript
+const sandbox = yield* sandboxes.create({ encryptedPorts: [3000] });
+const tunnels = yield* sandbox.tunnels();
+const url = tunnels[3000]!.url;
+```
+
+For a browser that shouldn't hold Modal credentials, use `sandbox.connectToken({ port: 3000 })`.
+
+## Size it
+
+```typescript
+const sandbox = yield* sandboxes.create({ cpu: 2, memory: 4096, gpu: "A10G" });
+```
+
+A sandbox lives at most 24 hours.

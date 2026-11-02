@@ -341,6 +341,9 @@
       "path": "./examples/cloudflare-turso-drizzle/tsconfig.json"
     },
     {
+      "path": "./examples/cloudflare-modal-sandbox/tsconfig.json"
+    },
+    {
       "path": "./examples/cloudflare-secrets-store/tsconfig.json"
     },
     {

@@ -1,5 +1,6 @@
 import * as container from "@distilled.cloud/modal/container";
 import { withTaskCommandRouter } from "@distilled.cloud/modal/Credentials";
+import type { ModalOpContext } from "@distilled.cloud/modal/Protocol";
 import * as sandbox from "@distilled.cloud/modal/sandbox";
 import * as router from "@distilled.cloud/modal/task_command_router";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
@@ -226,7 +227,7 @@ export interface SandboxHandleOf<R> {
 export type SandboxHandle = SandboxHandleOf<RuntimeContext>;
 
 /** A sandbox handle whose calls need Modal credentials and an HTTP client. */
-export type RawSandboxHandle = SandboxHandleOf<any>;
+export type RawSandboxHandle = SandboxHandleOf<ModalOpContext>;
 
 /** Where a sandbox client creates sandboxes. */
 export interface SandboxTarget {
@@ -524,9 +525,8 @@ export const sandboxHandle = (
     }),
     listFiles: Effect.fn(function* (path) {
       const { output } = yield* fsExec({ fileLsRequest: { path } }, path);
-      const text = (yield* Effect.forEach(output, decodeBase64))
-        .map((bytes) => new TextDecoder().decode(bytes))
-        .join("");
+      const chunks = yield* Effect.forEach(output, decodeBase64);
+      const text = chunks.map((bytes) => new TextDecoder().decode(bytes)).join("");
       // Modal answers `ls` with a JSON object: { paths: [...] }.
       const parsed = yield* Effect.try({
         try: () => JSON.parse(text || "{}") as { paths?: string[] },

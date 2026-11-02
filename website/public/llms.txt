@@ -141,6 +141,7 @@ A linear six-part walkthrough from zero to a tested, locally-developed, CI-deplo
 - [Browser rendering](https://alchemy.run/cloudflare/compute/browser-rendering) — Attach Cloudflare Browser Rendering to a Worker — run quick actions like markdown and scrape, stream screenshots and PDFs, or drive the raw binding with puppeteer.
 - [Worker Loader](https://alchemy.run/cloudflare/compute/worker-loader) — Load and run ephemeral Workers at runtime from inline source — each in its own sandboxed isolate, with optional outbound-network control and typed RPC entrypoints.
 - [Workers for Platforms](https://alchemy.run/cloudflare/compute/workers-for-platforms) — Run your customers' Workers in your own account — create a dispatch namespace, upload user Workers into it, and route requests from a platform Worker with the Get binding.
+- [Code updates](https://alchemy.run/cloudflare/compute/code-updates) — What happens to running Workers and Durable Objects when you deploy, how to choose when Durable Objects pick up new code, and how to write tests that see the code you just deployed.
 - [Container lifecycle](https://alchemy.run/cloudflare/compute/container-lifecycle) — Start, stop, wait for, and restore a Cloudflare Container from its Durable Object — and save its filesystem as a snapshot to restore later.
 - [Containers](https://alchemy.run/cloudflare/compute/containers) — Cloudflare Containers run long-lived processes beside a Durable Object — declare a typed container class, implement its runtime in a separate file, and alchemy builds the image, pushes it, and wires the DO pairing.
 - [Durable Objects](https://alchemy.run/cloudflare/compute/durable-objects) — Durable Objects are globally-unique stateful instances with transactional storage — define one as an Effect, persist state per key, expose typed RPC methods, and stream values back to the caller.
@@ -688,6 +689,44 @@ Turso SQLite databases as Stack resources: groups, databases, migrations, connec
 - [Tokens](https://alchemy.run/turso/tokens) — Create tokens for apps that run outside your Stack.
 - [Team & organization](https://alchemy.run/turso/organization) — Invite teammates and change your Turso organization's settings.
 
+## Modal
+
+Modal sandboxes, images, volumes, dicts, queues and secrets as Stack resources, created and driven from Workers and Lambdas.
+
+- [Modal](https://alchemy.run/modal) — Run agent sandboxes, build images, and keep files on Modal from your Workers and Lambdas.
+- [Setup](https://alchemy.run/modal/setup) — Give Alchemy a Modal token.
+- [Concepts](https://alchemy.run/modal/concepts) — How Modal environments, apps and objects map to your Stack.
+
+## Modal — Tutorial
+
+- [Part 1: Your First Stack](https://alchemy.run/modal/tutorial/part-1) — Declare a Modal environment, app and image.
+- [Part 2: Add a Sandbox](https://alchemy.run/modal/tutorial/part-2) — Create a sandbox from a Worker and give each user a volume.
+- [Part 3: Testing](https://alchemy.run/modal/tutorial/part-3) — Test the deployed API against real Modal sandboxes.
+- [Part 4: Stages](https://alchemy.run/modal/tutorial/part-4) — Deploy separate dev, staging and prod copies, each in its own Modal environment.
+- [Part 5: CI/CD](https://alchemy.run/modal/tutorial/part-5) — Deploy from GitHub Actions with a Modal token in repository secrets.
+
+## Modal — Sandboxes
+
+- [Images](https://alchemy.run/modal/sandboxes/images) — Build Modal images from a registry image, a Dockerfile, or another image.
+- [Sandboxes](https://alchemy.run/modal/sandboxes/sandboxes) — Create, find, run commands in, and stop Modal sandboxes from any runtime.
+- [Snapshots](https://alchemy.run/modal/sandboxes/snapshots) — Save a sandbox's files or memory and start new sandboxes from it.
+
+## Modal — Storage
+
+- [Dicts](https://alchemy.run/modal/storage/dicts) — Share key-value data between sandboxes, functions and Workers.
+- [Queues](https://alchemy.run/modal/storage/queues) — Hand work between Workers, sandboxes and Python functions.
+- [Volumes](https://alchemy.run/modal/storage/volumes) — Keep files on Modal volumes and read or write them without a sandbox.
+
+## Modal — Security
+
+- [Access control](https://alchemy.run/modal/security/access-control) — Separate workloads with environments, member roles and scoped tokens.
+- [Network & secrets](https://alchemy.run/modal/security/network-and-secrets) — Limit what a sandbox can reach and give it credentials it can't read.
+
+## Modal — Functions
+
+- [Autoscaling](https://alchemy.run/modal/functions/autoscaling) — Keep containers warm and cap concurrency for a deployed function.
+- [Call Python functions](https://alchemy.run/modal/functions/calling-functions) — Call functions you deployed with modal deploy from a Worker or Lambda.
+
 ## Better Auth
 
 Better Auth as an Effect service on Workers and Lambda: a tutorial, sign-in providers, database layers, and guides for config, middleware, secondary storage, migrations, and upgrades.
@@ -918,4 +957,4 @@ A domain-driven design framework: model commands, events, aggregates, views, pro
 
 Service-level API reference, generated from JSDoc on the source `.ts` files via `bun scripts/generate-api-reference.ts`. Each page groups resources and capabilities by service, with a heading per resource and examples extracted from source JSDoc.
 
-The service-level pages are indexed in [llms-full.txt](https://alchemy.run/llms-full.txt), which repeats this entire file plus one link per service. Warning: it is large (~201 KB) — only fetch it when you need to locate a specific resource's reference page.
+The service-level pages are indexed in [llms-full.txt](https://alchemy.run/llms-full.txt), which repeats this entire file plus one link per service. Warning: it is large (~205 KB) — only fetch it when you need to locate a specific resource's reference page.

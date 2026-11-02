@@ -66,8 +66,9 @@ export const makeReadQueueClient = (
   take: <A>(options: Parameters<ReadQueueClient["take"]>[0] = {}) =>
     client(
       Effect.gen(function* () {
+        const id = yield* queueId;
         const { values } = yield* queue.getQueue({
-          queueId: yield* queueId,
+          queueId: id,
           partitionKey: options.partition,
           nValues: options.count ?? 1,
           timeout: seconds(options.timeout) ?? 0,
@@ -78,8 +79,9 @@ export const makeReadQueueClient = (
   peek: <A>(options: QueuePartitionOptions = {}) =>
     client(
       Effect.gen(function* () {
+        const id = yield* queueId;
         const { items } = yield* queue.queueNextItems({
-          queueId: yield* queueId,
+          queueId: id,
           partitionKey: options.partition,
           itemPollTimeout: 0,
         });
@@ -89,8 +91,9 @@ export const makeReadQueueClient = (
   len: (options = {}) =>
     client(
       Effect.gen(function* () {
+        const id = yield* queueId;
         const response = yield* queue.queueLen({
-          queueId: yield* queueId,
+          queueId: id,
           partitionKey: options.partition,
           total: options.total,
         });
@@ -106,9 +109,10 @@ export const makeWriteQueueClient = (
   const putMany: WriteQueueClient["putMany"] = (values, options = {}) =>
     client(
       Effect.gen(function* () {
+        const id = yield* queueId;
         const encoded = yield* Effect.forEach([...values], (value) => encodeJson(value));
         yield* queue.putQueue({
-          queueId: yield* queueId,
+          queueId: id,
           values: encoded,
           partitionKey: options.partition,
           partitionTtlSeconds: seconds(options.partitionTtl),
@@ -122,8 +126,9 @@ export const makeWriteQueueClient = (
     clear: (options = {}) =>
       client(
         Effect.gen(function* () {
+          const id = yield* queueId;
           yield* queue.clearQueue({
-            queueId: yield* queueId,
+            queueId: id,
             partitionKey: options.partition,
             allPartitions: options.all,
           });

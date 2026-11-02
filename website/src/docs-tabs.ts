@@ -97,6 +97,7 @@ export const DOCS_TABS: DocsTab[] = [
     "/providers/acme",
   ]),
 
+  hub("Modal", "modal", "Containers", "sandboxes · images · volumes · GPUs", ["/providers/modal"]),
   hub("Docker", "docker", "Containers", "images · containers · networks", ["/providers/docker"]),
   hub("Kubernetes", "kubernetes", "Containers", "deployments · jobs · manifests · helm", [
     "/providers/kubernetes",

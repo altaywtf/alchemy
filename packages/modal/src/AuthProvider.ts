@@ -37,8 +37,10 @@ const trimmed = (value: Redacted.Redacted<string> | undefined) =>
     : Redacted.make(Redacted.value(value).trim());
 
 const readEnvironment = Effect.gen(function* () {
-  const tokenId = trimmed(yield* getEnvRedacted("MODAL_TOKEN_ID"));
-  const tokenSecret = trimmed(yield* getEnvRedacted("MODAL_TOKEN_SECRET"));
+  const rawTokenId = yield* getEnvRedacted("MODAL_TOKEN_ID");
+  const rawTokenSecret = yield* getEnvRedacted("MODAL_TOKEN_SECRET");
+  const tokenId = trimmed(rawTokenId);
+  const tokenSecret = trimmed(rawTokenSecret);
   if (tokenId === undefined || tokenSecret === undefined) {
     return yield* AuthError.make({
       message: "Modal CI credentials not found. Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET.",

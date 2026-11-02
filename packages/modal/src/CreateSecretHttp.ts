@@ -18,7 +18,8 @@ export const makeSecretsClient = (
   delete: (name) =>
     client(
       Effect.gen(function* () {
-        const found = yield* lookupSecret(name, yield* environment);
+        const env = yield* environment;
+        const found = yield* lookupSecret(name, env);
         if (!found) return;
         yield* secret
           .deleteSecret({ secretId: found.secretId })

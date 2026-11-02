@@ -63,7 +63,8 @@ export const CreateImageHttp = Layer.effect(
   makeModalBinding({
     tag: "Modal.CreateImage",
     make: Effect.fn(function* (app: App, client) {
-      return makeImagesClient(yield* app.appId, client);
+      const appId = yield* app.appId;
+      return makeImagesClient(appId, client);
     }),
   }),
 );

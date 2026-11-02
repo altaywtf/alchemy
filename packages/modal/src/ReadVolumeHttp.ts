@@ -18,7 +18,8 @@ export const ReadVolumeHttp = Layer.effect(
   makeModalBinding({
     tag: "Modal.ReadVolume",
     make: Effect.fn(function* (volume: Volume, client) {
-      return makeReadVolumeClient(yield* volume.volumeId, client);
+      const volumeId = yield* volume.volumeId;
+      return makeReadVolumeClient(volumeId, client);
     }),
   }),
 );

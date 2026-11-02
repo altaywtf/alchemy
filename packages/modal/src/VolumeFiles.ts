@@ -55,7 +55,8 @@ export const readVolumeFile = Effect.fn(function* (volumeId: string, path: strin
         message: `Downloading a block of ${path} failed with HTTP ${response.status}`,
       });
     }
-    const block = new Uint8Array(yield* response.arrayBuffer);
+    const buffer = yield* response.arrayBuffer;
+    const block = new Uint8Array(buffer);
     out.set(block.subarray(0, Math.max(0, total - offset)), offset);
     offset += Math.min(block.length, BLOCK_SIZE);
   }
@@ -138,8 +139,9 @@ export const writeVolumeFile = Effect.fn(function* (
           message: `Uploading block ${index} of ${path} failed with HTTP ${response.status}`,
         });
       }
-      const body = new Uint8Array(yield* response.arrayBuffer);
-      putResponses.set(index, yield* Effect.sync(() => Buffer.from(body).toString("base64")));
+      const body = yield* response.arrayBuffer;
+      const encoded = yield* Effect.sync(() => Buffer.from(body).toString("base64"));
+      putResponses.set(index, encoded);
     }
   }
   return yield* new VolumeTransferError({

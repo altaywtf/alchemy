@@ -49,9 +49,11 @@ export const makeReadDictClient = (
   get: <A>(key: unknown) =>
     client(
       Effect.gen(function* () {
+        const encodedKey = yield* encodeJson(key);
+        const id = yield* dictId;
         const response = yield* dict.getDict({
-          dictId: yield* dictId,
-          key: yield* encodeJson(key),
+          dictId: id,
+          key: encodedKey,
         });
         return response.found && response.value !== undefined
           ? yield* decodeJson<A>(response.value)
@@ -61,9 +63,11 @@ export const makeReadDictClient = (
   contains: (key) =>
     client(
       Effect.gen(function* () {
+        const encodedKey = yield* encodeJson(key);
+        const id = yield* dictId;
         const response = yield* dict.dictContains({
-          dictId: yield* dictId,
-          key: yield* encodeJson(key),
+          dictId: id,
+          key: encodedKey,
         });
         return response.found ?? false;
       }),
@@ -71,15 +75,17 @@ export const makeReadDictClient = (
   len: () =>
     client(
       Effect.gen(function* () {
-        const response = yield* dict.dictLen({ dictId: yield* dictId });
+        const id = yield* dictId;
+        const response = yield* dict.dictLen({ dictId: id });
         return response.len ?? 0;
       }),
     ),
   entries: <A>() =>
     client(
       Effect.gen(function* () {
+        const id = yield* dictId;
         const { items } = yield* dict.dictContents({
-          dictId: yield* dictId,
+          dictId: id,
           keys: true,
           values: true,
         });
@@ -98,9 +104,11 @@ export const makeWriteDictClient = (
   put: (key, value, options = {}) =>
     client(
       Effect.gen(function* () {
+        const encodedKey = yield* encodeJson(key);
+        const id = yield* dictId;
         const response = yield* dict.updateDict({
-          dictId: yield* dictId,
-          updates: [{ key: yield* encodeJson(key), value: yield* encodeJson(value) }],
+          dictId: id,
+          updates: [{ key: encodedKey, value: yield* encodeJson(value) }],
           ifNotExists: options.ifNotExists,
         });
         return options.ifNotExists ? (response.created ?? false) : true;
@@ -112,15 +120,18 @@ export const makeWriteDictClient = (
         const updates = yield* Effect.forEach([...entries], ([key, value]) =>
           Effect.all({ key: encodeJson(key), value: encodeJson(value) }),
         );
-        yield* dict.updateDict({ dictId: yield* dictId, updates });
+        const id = yield* dictId;
+        yield* dict.updateDict({ dictId: id, updates });
       }),
     ),
   pop: <A>(key: unknown) =>
     client(
       Effect.gen(function* () {
+        const encodedKey = yield* encodeJson(key);
+        const id = yield* dictId;
         const response = yield* dict.dictPop({
-          dictId: yield* dictId,
-          key: yield* encodeJson(key),
+          dictId: id,
+          key: encodedKey,
         });
         return response.found && response.value !== undefined
           ? yield* decodeJson<A>(response.value)
@@ -130,7 +141,8 @@ export const makeWriteDictClient = (
   clear: () =>
     client(
       Effect.gen(function* () {
-        yield* dict.clearDict({ dictId: yield* dictId });
+        const id = yield* dictId;
+        yield* dict.clearDict({ dictId: id });
       }),
     ),
 });

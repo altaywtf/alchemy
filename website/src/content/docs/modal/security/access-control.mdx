@@ -1,0 +1,60 @@
+---
+title: Access control
+description: Separate workloads with environments, member roles and scoped tokens.
+---
+
+Modal tokens act on the whole workspace. A binding writes your token into its host. Keep workloads apart with environments.
+
+## Restrict an environment
+
+```typescript
+// src/Environments.ts
+import * as Modal from "@alchemy.run/modal";
+
+export const Production = Modal.Environment("Production", {
+  managed: true,
+  defaultMemberRole: "viewer",
+  roles: [{ userId: "us-1234", role: "contributor" }],
+  blockUnauthenticatedResources: true,
+});
+```
+
+Members not listed get `defaultMemberRole`.
+
+## Share one port
+
+```typescript
+const { url, token } = yield* sandbox.connectToken({ port: 8080, userMetadata: user });
+```
+
+The token opens that port only.
+
+## Tokens for protected endpoints
+
+```typescript
+// src/Tokens.ts
+import * as Modal from "@alchemy.run/modal";
+import { Production } from "./Environments.ts";
+
+export const Caller = Modal.WebhookToken("Caller", {
+  scoped: true,
+  environments: [Production],
+});
+```
+
+Send `tokenId` as `Modal-Key` and `tokenSecret` as `Modal-Secret`.
+
+## Workspace defaults
+
+```typescript
+// src/Settings.ts
+import * as Modal from "@alchemy.run/modal";
+import { Production } from "./Environments.ts";
+
+export const Settings = Modal.WorkspaceSettings("Settings", {
+  defaultEnvironment: Production,
+  blockUnauthenticatedResources: true,
+});
+```
+
+Destroying it restores the settings it found.

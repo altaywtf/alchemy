@@ -18,7 +18,8 @@ export const ReadQueueHttp = Layer.effect(
   makeModalBinding({
     tag: "Modal.ReadQueue",
     make: Effect.fn(function* (queue: Queue, client) {
-      return makeReadQueueClient(yield* queue.queueId, client);
+      const queueId = yield* queue.queueId;
+      return makeReadQueueClient(queueId, client);
     }),
   }),
 );

@@ -18,7 +18,8 @@ export const WriteQueueHttp = Layer.effect(
   makeModalBinding({
     tag: "Modal.WriteQueue",
     make: Effect.fn(function* (queue: Queue, client) {
-      return makeWriteQueueClient(yield* queue.queueId, client);
+      const queueId = yield* queue.queueId;
+      return makeWriteQueueClient(queueId, client);
     }),
   }),
 );

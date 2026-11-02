@@ -1,0 +1,85 @@
+---
+title: Modal
+description: Run agent sandboxes, build images, and keep files on Modal from your Workers and Lambdas.
+---
+
+Modal runs sandboxes: short-lived containers you create from code, with GPUs if you want them. Declare their images, volumes and secrets in your Stack, and create sandboxes from any Worker or Lambda.
+
+New here? [Set up credentials](/modal/setup) first, then [build the tutorial](/modal/tutorial/part-1).
+
+## Declare an image and a warm base
+
+```typescript
+// src/Sandbox.ts
+import * as Modal from "@alchemy.run/modal";
+
+export const Agents = Modal.Environment("Agents", {});
+
+export const Coder = Modal.App("Coder", { environment: Agents });
+
+export const Node = Modal.Image("Node", {
+  app: Coder,
+  image: "node:22-bookworm",
+  commands: ["RUN apt-get update && apt-get install -y git"],
+});
+
+export const Warm = Modal.Image("Warm", {
+  app: Coder,
+  from: Node,
+  run: ["git clone --depth 1 https://github.com/sindresorhus/is /work"],
+});
+```
+
+Modal builds images on its own builders, so deploying needs no Docker. `Warm` runs its setup once at deploy and saves the result, so every sandbox starts with the repo already cloned.
+
+## Run a sandbox from a Worker
+
+```typescript
+// src/Api.ts
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Modal from "@alchemy.run/modal";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { HttpServerRequest } from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { Agents, Warm } from "./Sandbox.ts";
+
+export default class Api extends Cloudflare.Worker<Api>()(
+  "Api",
+  { main: import.meta.url, compatibility: { flags: ["nodejs_compat"] } },
+  Effect.gen(function* () {
+    const sandboxes = yield* Modal.CreateSandbox(Warm);
+    const volumes = yield* Modal.CreateVolume(Agents);
+
+    return {
+      fetch: Effect.gen(function* () {
+        const request = yield* HttpServerRequest;
+        const user = new URL(request.url, "http://api").searchParams.get("user") ?? "anonymous";
+        const home = yield* volumes.getOrCreate(`home-${user}`);
+        const sandbox = yield* sandboxes.create({
+          volumes: { "/home/user": home.attributes },
+          timeout: "5 minutes",
+        });
+        const result = yield* sandbox
+          .exec(["ls", "/work"])
+          .pipe(Effect.ensuring(Effect.ignore(sandbox.terminate())));
+        return yield* HttpServerResponse.json(result);
+      }).pipe(Effect.orDie),
+    };
+  }).pipe(Effect.provide(Layer.mergeAll(Modal.CreateSandboxHttp, Modal.CreateVolumeHttp))),
+) {}
+```
+
+Each user gets their own volume, created by name the first time they call. The code is in [`examples/cloudflare-modal-sandbox`](https://github.com/alchemy-run/alchemy/tree/main/examples/cloudflare-modal-sandbox).
+
+## Where next
+
+- [Concepts](/modal/concepts): environments, apps, and objects you create at runtime
+- Sandboxes: [Sandboxes](/modal/sandboxes/sandboxes), [Images](/modal/sandboxes/images), [Snapshots](/modal/sandboxes/snapshots)
+- Storage: [Volumes](/modal/storage/volumes), [Dicts](/modal/storage/dicts), [Queues](/modal/storage/queues)
+- Security: [Network & secrets](/modal/security/network-and-secrets), [Access control](/modal/security/access-control)
+- Functions: [Call Python functions](/modal/functions/calling-functions), [Autoscaling](/modal/functions/autoscaling)
+
+## Out of scope
+
+Alchemy doesn't deploy Python functions: Modal builds them from Python source with `modal deploy`. Call them with `Modal.InvokeFunction` and tune them with `Modal.FunctionAutoscaler`. Billing reports, notebooks and Modal's internal container RPCs aren't modeled.

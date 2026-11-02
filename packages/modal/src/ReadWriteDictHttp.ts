@@ -18,7 +18,8 @@ export const ReadWriteDictHttp = Layer.effect(
   makeModalBinding({
     tag: "Modal.ReadWriteDict",
     make: Effect.fn(function* (dict: Dict, client) {
-      return makeReadWriteDictClient(yield* dict.dictId, client);
+      const dictId = yield* dict.dictId;
+      return makeReadWriteDictClient(dictId, client);
     }),
   }),
 );

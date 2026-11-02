@@ -1,0 +1,53 @@
+---
+title: Setup
+description: Give Alchemy a Modal token.
+---
+
+import PackageManagers from "../../../components/PackageManagers.astro";
+
+Sign up at [modal.com](https://modal.com), then create a token in [Settings → API Tokens](https://modal.com/settings/tokens). You get a token id (`ak-…`) and a secret (`as-…`).
+
+If you already use the `modal` CLI, the pair is in `~/.modal.toml`.
+
+## Add the provider
+
+Install `@alchemy.run/modal`:
+
+<PackageManagers add="@alchemy.run/modal" />
+
+Then add `Modal.providers()` next to your cloud's providers:
+
+```typescript
+// alchemy.run.ts
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Modal from "@alchemy.run/modal";
+import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+
+export default Alchemy.Stack(
+  "App",
+  { providers: Layer.mergeAll(Cloudflare.providers(), Modal.providers()) },
+  Effect.gen(function* () {
+    return {};
+  }),
+);
+```
+
+## Store the token in a profile
+
+```sh
+alchemy profile edit --add Modal
+```
+
+Paste the token id and secret when asked. See [Profiles](/environments/profiles) to learn how profiles work.
+
+## Use environment variables in CI
+
+Set `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, the same variables the `modal` CLI reads:
+
+```sh
+MODAL_TOKEN_ID=ak-... MODAL_TOKEN_SECRET=as-... alchemy deploy
+```
+
+A Modal token acts on the whole workspace. Use a separate workspace for tests.
