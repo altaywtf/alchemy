@@ -5,7 +5,7 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
-import { objectName, type Ref } from "./internal.ts";
+import { objectName } from "./internal.ts";
 import type { Providers } from "./Providers.ts";
 
 export class WebhookTokenUnexpectedResponse extends Data.TaggedError(
@@ -27,10 +27,10 @@ export interface WebhookTokenProps {
    */
   scoped?: boolean;
   /**
-   * Environments a scoped token works in: `Modal.Environment` declarations
-   * or environment IDs. Ignored unless {@link scoped} is set.
+   * Environments a scoped token works in: environment IDs, or yielded
+   * `Modal.Environment`s. Ignored unless {@link scoped} is set.
    */
-  environments?: Array<string | Ref<{ readonly environmentId: string }>>;
+  environments?: Array<string | { readonly environmentId: string }>;
 }
 
 export interface WebhookTokenAttributes {
@@ -67,11 +67,12 @@ export interface WebhookTokenAttributes {
  * **Example:** A token scoped to one environment
  * ```typescript
  * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
  *
  * export const Agents = Modal.Environment("Agents", {});
- * export const AgentsCaller = Modal.WebhookToken("AgentsCaller", {
- *   scoped: true,
- *   environments: [Agents],
+ * export const AgentsCaller = Effect.gen(function* () {
+ *   const agents = yield* Agents;
+ *   return yield* Modal.WebhookToken("AgentsCaller", { scoped: true, environments: [agents] });
  * });
  * ```
  *

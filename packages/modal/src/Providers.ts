@@ -7,6 +7,8 @@ import { App, AppProvider } from "./App.ts";
 import { ModalAuth } from "./AuthProvider.ts";
 import * as Credentials from "./Credentials.ts";
 import { Dict, DictProvider } from "./Dict.ts";
+import { Domain, DomainProvider } from "./Domain.ts";
+import { Endpoint, EndpointProvider } from "./Endpoint.ts";
 import { Environment, EnvironmentProvider } from "./Environment.ts";
 import { FunctionAutoscaler, FunctionAutoscalerProvider } from "./FunctionAutoscaler.ts";
 import { Image, ImageProvider } from "./Image.ts";
@@ -41,6 +43,8 @@ export const providers = () =>
     Provider.collection([
       App,
       Dict,
+      Domain,
+      Endpoint,
       Environment,
       FunctionAutoscaler,
       Image,
@@ -57,6 +61,8 @@ export const providers = () =>
       Layer.mergeAll(
         AppProvider(),
         DictProvider(),
+        DomainProvider(),
+        EndpointProvider(),
         EnvironmentProvider(),
         FunctionAutoscalerProvider(),
         ImageProvider(),

@@ -34,11 +34,12 @@ The token opens that port only.
 ```typescript
 // src/Tokens.ts
 import * as Modal from "@alchemy.run/modal";
+import * as Effect from "effect/Effect";
 import { Production } from "./Environments.ts";
 
-export const Caller = Modal.WebhookToken("Caller", {
-  scoped: true,
-  environments: [Production],
+export const Caller = Effect.gen(function* () {
+  const production = yield* Production;
+  return yield* Modal.WebhookToken("Caller", { scoped: true, environments: [production] });
 });
 ```
 
@@ -49,11 +50,15 @@ Send `tokenId` as `Modal-Key` and `tokenSecret` as `Modal-Secret`.
 ```typescript
 // src/Settings.ts
 import * as Modal from "@alchemy.run/modal";
+import * as Effect from "effect/Effect";
 import { Production } from "./Environments.ts";
 
-export const Settings = Modal.WorkspaceSettings("Settings", {
-  defaultEnvironment: Production,
-  blockUnauthenticatedResources: true,
+export const Settings = Effect.gen(function* () {
+  const production = yield* Production;
+  return yield* Modal.WorkspaceSettings("Settings", {
+    defaultEnvironment: production,
+    blockUnauthenticatedResources: true,
+  });
 });
 ```
 

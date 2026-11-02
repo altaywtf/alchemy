@@ -90,14 +90,11 @@ export const stringMap = (
 export const isGeneratedName = (name: string | undefined): boolean =>
   name !== undefined && /-[a-z2-7]{16}$/.test(name);
 
-/** A resource reference: the declaration itself (resolved by the engine) or its attributes. */
-export type Ref<T> = T | Effect.Effect<T, never, any>;
-
 /**
- * An environment by name, or a `Modal.Environment` declaration (resolved to
- * its attributes at deploy).
+ * An environment by name, or a `Modal.Environment` (yielded: `yield* Agents`)
+ * whose name is used.
  */
-export type EnvironmentInput = string | Ref<{ readonly name: string }>;
+export type EnvironmentInput = string | { readonly name: string };
 
 /** The environment name an {@link EnvironmentInput} resolved to. */
 export const envNameOf = (value: unknown): string | undefined =>

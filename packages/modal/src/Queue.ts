@@ -68,9 +68,13 @@ export interface QueueAttributes {
  * **Example:** A named queue in an environment
  * ```typescript
  * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
  *
  * export const Agents = Modal.Environment("Agents", {});
- * export const Tasks = Modal.Queue("Tasks", { name: "tasks", environment: Agents });
+ * export const Tasks = Effect.gen(function* () {
+ *   const agents = yield* Agents;
+ *   return yield* Modal.Queue("Tasks", { name: "tasks", environment: agents });
+ * });
  * ```
  *
  * ### Producing from a Worker

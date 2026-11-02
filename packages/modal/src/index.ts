@@ -13,6 +13,8 @@ export * from "./CreateSecretHttp.ts";
 export * from "./CreateVolume.ts";
 export * from "./CreateVolumeHttp.ts";
 export * from "./Dict.ts";
+export * from "./Domain.ts";
+export * from "./Endpoint.ts";
 export * from "./Environment.ts";
 export * from "./FunctionAutoscaler.ts";
 export * from "./Image.ts";

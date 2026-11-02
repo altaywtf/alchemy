@@ -70,12 +70,16 @@ export interface AppAttributes {
  * **Example:** A named, tagged app in an environment
  * ```typescript
  * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
  *
  * export const Agents = Modal.Environment("Agents", {});
- * export const Coder = Modal.App("Coder", {
- *   name: "coder",
- *   environment: Agents,
- *   tags: { team: "platform" },
+ * export const Coder = Effect.gen(function* () {
+ *   const agents = yield* Agents;
+ *   return yield* Modal.App("Coder", {
+ *     name: "coder",
+ *     environment: agents,
+ *     tags: { team: "platform" },
+ *   });
  * });
  * ```
  *

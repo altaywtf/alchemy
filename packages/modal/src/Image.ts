@@ -11,7 +11,6 @@ import {
   lowerImageEnvironment,
   type ImageBuildSpec,
 } from "./ImageBuild.ts";
-import type { Ref } from "./internal.ts";
 import type { Providers } from "./Providers.ts";
 import { createSandbox } from "./SandboxClient.ts";
 
@@ -24,7 +23,7 @@ export class ImageSetupFailed extends Data.TaggedError("Modal.ImageSetupFailed")
 
 export interface ImageProps {
   /** The App the image is built in (`Modal.App`). Images are cached per workspace. */
-  app: Ref<{ readonly appId: string; readonly name?: string; readonly environment?: string }>;
+  app: { readonly appId: string; readonly name?: string; readonly environment?: string };
   /**
    * Start from a registry image (`node:22-slim`, `ghcr.io/org/base:1`).
    * Exclusive with {@link dockerfile} and {@link from}.
@@ -39,7 +38,7 @@ export interface ImageProps {
   /** Build context for the Dockerfile's COPY/ADD sources. */
   context?: string;
   /** Start from another `Modal.Image` (a warm base built on a base). */
-  from?: Ref<{ readonly imageId: string }>;
+  from?: { readonly imageId: string };
   /** Dockerfile lines appended to the build (`"RUN pip install pandas"`). */
   commands?: string[];
   /**
@@ -50,11 +49,11 @@ export interface ImageProps {
    */
   run?: string[];
   /** Secrets the build (and `run`) sees as environment variables. */
-  secrets?: Array<Ref<{ readonly secretId: string }>>;
+  secrets?: Array<{ readonly secretId: string }>;
   /** Pull a private base image with credentials stored in a `Modal.Secret`. */
   registry?: {
     readonly type: "aws" | "gcp" | "static";
-    readonly secret: Ref<{ readonly secretId: string }>;
+    readonly secret: { readonly secretId: string };
   };
   /** Run build steps on a GPU (`"A10G"`, `"H100"`). */
   gpu?: string;
@@ -92,12 +91,16 @@ export interface ImageAttributes {
  * **Example:** From a registry image with extra packages
  * ```typescript
  * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
  *
  * export const Coder = Modal.App("Coder", {});
- * export const Node = Modal.Image("Node", {
- *   app: Coder,
- *   image: "node:22-bookworm",
- *   commands: ["RUN apt-get update && apt-get install -y git ripgrep"],
+ * export const Node = Effect.gen(function* () {
+ *   const app = yield* Coder;
+ *   return yield* Modal.Image("Node", {
+ *     app,
+ *     image: "node:22-bookworm",
+ *     commands: ["RUN apt-get update && apt-get install -y git ripgrep"],
+ *   });
  * });
  * ```
  *
@@ -105,14 +108,18 @@ export interface ImageAttributes {
  * ```typescript
  * import * as Dockerfile from "@alchemy.run/docker/Dockerfile";
  * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
  *
  * export const Coder = Modal.App("Coder", {});
- * export const Python = Modal.Image("Python", {
- *   app: Coder,
- *   dockerfile: Dockerfile.inline`
- *     FROM python:3.12-slim
- *     RUN pip install pandas
- *   `,
+ * export const Python = Effect.gen(function* () {
+ *   const app = yield* Coder;
+ *   return yield* Modal.Image("Python", {
+ *     app,
+ *     dockerfile: Dockerfile.inline`
+ *       FROM python:3.12-slim
+ *       RUN pip install pandas
+ *     `,
+ *   });
  * });
  * ```
  *
@@ -120,16 +127,20 @@ export interface ImageAttributes {
  * **Example:** Clone and install once, start every sandbox from it
  * ```typescript
  * import * as Modal from "@alchemy.run/modal";
+ * import * as Effect from "effect/Effect";
  *
  * export const Coder = Modal.App("Coder", {});
- * export const Node = Modal.Image("Node", { app: Coder, image: "node:22-bookworm" });
- * export const Warm = Modal.Image("Warm", {
- *   app: Coder,
- *   from: Node,
- *   run: [
- *     "git clone https://github.com/alchemy-run/alchemy /work",
- *     "cd /work && corepack enable && pnpm install",
- *   ],
+ * export const Warm = Effect.gen(function* () {
+ *   const app = yield* Coder;
+ *   const node = yield* Modal.Image("Node", { app, image: "node:22-bookworm" });
+ *   return yield* Modal.Image("Warm", {
+ *     app,
+ *     from: node,
+ *     run: [
+ *       "git clone https://github.com/alchemy-run/alchemy /work",
+ *       "cd /work && corepack enable && pnpm install",
+ *     ],
+ *   });
  * });
  * ```
  *
