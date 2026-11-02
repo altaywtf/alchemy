@@ -461,9 +461,10 @@ export const SnapshotProvider = () =>
         }
       }),
       read: Effect.fn(function* ({ id, olds, output }) {
+        const name = yield* resolveName(id, olds?.name, output?.name);
         const found =
           (output ? yield* getSnapshot(output.snapshotId) : undefined) ??
-          (yield* getSnapshot(yield* resolveName(id, olds?.name, output?.name)));
+          (yield* getSnapshot(name));
         if (found === undefined) return undefined;
         const attrs = toSnapshotAttributes(found, output?.buildHash ?? "");
         return (yield* isOwnedName(id, found.name, output !== undefined)) ? attrs : Unowned(attrs);

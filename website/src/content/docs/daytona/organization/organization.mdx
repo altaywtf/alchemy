@@ -1,9 +1,9 @@
 ---
 title: Organization
-description: Manage roles, members, SSO, settings, telemetry export and webhooks for your Daytona organization.
+description: Manage roles, members, SSO, settings, telemetry export, webhooks and your own compute for a Daytona organization.
 ---
 
-## Roles
+## Create a role
 
 ```typescript
 // src/Team.ts
@@ -17,30 +17,35 @@ export const Developer = Daytona.OrganizationRole("Developer", {
 
 ## Invite someone
 
-```typescript
-export const Alice = Daytona.OrganizationInvitation("Alice", {
-  email: "alice@example.com",
-  roles: [Developer],
-});
+```diff lang="typescript"
+// src/Team.ts
++export const Alice = Daytona.OrganizationInvitation("Alice", {
++  email: "alice@example.com",
++  roles: [Developer],
++});
 ```
 
 Destroy cancels the invitation if it is still pending.
 
 ## Change a member's access
 
-```typescript
-export const Bob = Daytona.OrganizationMember("Bob", {
-  user: "bob@example.com",
-  role: "member",
-  roles: [Developer],
-});
+```diff lang="typescript"
+// src/Team.ts
++export const Bob = Daytona.OrganizationMember("Bob", {
++  user: "bob@example.com",
++  role: "member",
++  roles: [Developer],
++});
 ```
 
 Destroy puts back the access Bob had before. Set `removeOnDestroy: true` to remove him instead.
 
-## Settings
+## Change settings
 
 ```typescript
+// src/Organization.ts
+import * as Daytona from "@alchemy.run/daytona";
+
 export const Settings = Daytona.OrganizationSettings("Settings", {
   defaultRegionId: "eu",
   defaultQueueTimeout: "1 minute",
@@ -52,6 +57,8 @@ Only the settings you declare change, and destroy puts the old values back.
 ## Export telemetry
 
 ```typescript
+// src/Telemetry.ts
+import * as Daytona from "@alchemy.run/daytona";
 import * as Alchemy from "alchemy";
 
 export const Telemetry = Daytona.OrganizationOtelConfig("Telemetry", {
@@ -60,9 +67,16 @@ export const Telemetry = Daytona.OrganizationOtelConfig("Telemetry", {
 });
 ```
 
+Sandboxes send their logs, traces and metrics to your backend.
+
 ## Single sign-on
 
 ```typescript
+// src/Sso.ts
+import * as Daytona from "@alchemy.run/daytona";
+import * as Alchemy from "alchemy";
+import { Developer } from "./Team.ts";
+
 export const Sso = Daytona.IdentityProvider("Sso", {
   issuerUrl: "https://login.example.com",
   clientId: "daytona",
@@ -74,17 +88,23 @@ export const Sso = Daytona.IdentityProvider("Sso", {
 
 SSO needs a Daytona plan that includes it.
 
-## Webhooks
+## Turn on webhooks
 
 ```typescript
+// src/Webhooks.ts
+import * as Daytona from "@alchemy.run/daytona";
+
 export const Events = Daytona.Webhooks("Events", {});
 ```
 
-This turns on delivery. Add endpoints in Daytona's webhook portal; get a link to it at runtime with `ReadOrganization`'s `getWebhookControllerAppPortalAccess`.
+Add endpoints in Daytona's webhook portal. A Worker gets a link to it with `ReadOrganization`'s `getWebhookControllerAppPortalAccess`.
 
-## Your own compute
+## Run sandboxes on your own machines
 
 ```typescript
+// src/Compute.ts
+import * as Daytona from "@alchemy.run/daytona";
+
 export const Home = Daytona.Region("Home", {
   proxyUrl: "https://proxy.daytona.example.com",
   sshGatewayUrl: "ssh.daytona.example.com:2222",
@@ -93,4 +113,8 @@ export const Home = Daytona.Region("Home", {
 export const Box1 = Daytona.Runner("Box1", { region: Home });
 ```
 
-A custom region runs sandboxes on machines you operate. `Box1.apiKey` is the key you start the runner daemon with. Set `draining: true` to move sandboxes off a runner.
+`Box1.apiKey` is the key you start the runner daemon with. Set `draining: true` to move sandboxes off a runner, and bump `rotate.proxyApiKey` on the region to rotate its proxy key.
+
+## Out of scope
+
+Signing in, accepting invitations, and linking accounts act as a user, not as your organization, so Alchemy leaves them to the Daytona dashboard.

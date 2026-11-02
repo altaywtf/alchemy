@@ -119,9 +119,9 @@ export const RegionProvider = () =>
         if (name !== output.name) return { action: "replace", deleteFirst: true } as const;
       }),
       read: Effect.fn(function* ({ id, olds, output }) {
+        const name = yield* resolveName(id, olds?.name, output?.name);
         const found =
-          (output ? yield* getById(output.regionId) : undefined) ??
-          (yield* findByName(yield* resolveName(id, olds?.name, output?.name)));
+          (output ? yield* getById(output.regionId) : undefined) ?? (yield* findByName(name));
         if (found === undefined) return undefined;
         const attrs: RegionAttributes = output ?? {
           regionId: found.id,

@@ -46,5 +46,7 @@ const lazyHandle = (resolve: Effect.Effect<DaytonaSandbox, never, any>): Daytona
           return target[path.at(-1)!](...args);
         }),
     });
+  // A Proxy has no static shape; it forwards every DaytonaSandbox path to
+  // the handle resolved at runtime, so the two are the same at the call site.
   return forward([]) as unknown as DaytonaSandbox;
 };

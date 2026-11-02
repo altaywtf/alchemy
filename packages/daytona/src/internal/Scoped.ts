@@ -60,6 +60,8 @@ export const scopeModule = <M extends object>(
             }),
           ),
       ]),
+    // Object.fromEntries can't produce a mapped type; the entries are exactly
+    // the module's operations, each wrapped with the signature ScopedModule gives it.
   ) as unknown as ScopedModule<M>;
 
 /** The named operations of a module, as a module-shaped object. */

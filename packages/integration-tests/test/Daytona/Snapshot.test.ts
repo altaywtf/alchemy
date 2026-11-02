@@ -62,7 +62,7 @@ test.provider.skipIf(!!process.env.FAST)(
       expect(pulled.state).toEqual("active");
       expect(built.state).toEqual("active");
       expect(warm.state).toEqual("active");
-      expect(warm.sourceSandboxId).toBeDefined();
+      expect(warm.sourceSandboxId).toMatch(/.+/);
       // The build sandbox is gone once the snapshot is captured.
       const build = yield* sandboxes
         .getSandbox({ sandboxIdOrName: warm.sourceSandboxId! })

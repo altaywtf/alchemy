@@ -77,5 +77,7 @@ export const lazyScoped = <C extends object>(
     get:
       (_t, key: string) =>
       (...args: unknown[]) =>
+        // `key` is a property of C (the Proxy only sees C's members), but a
+        // Proxy trap types it as string, so the lookup is untyped here.
         Effect.flatMap(organizationId, (id) => (make(id) as any)[key](...args)),
   });

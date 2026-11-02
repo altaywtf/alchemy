@@ -28,7 +28,7 @@ test.provider(
       expect(created.state).toEqual("started");
       expect(created.labels).toEqual({ team: "alchemy" });
       const observed = yield* sandboxes.getSandbox({ sandboxIdOrName: created.sandboxId });
-      expect(observed.labels?.["alchemy.id"]).toBeDefined();
+      expect(observed.labels?.["alchemy.id"]).toContain("Box");
       expect(observed.autoStopInterval).toEqual(30);
       expect(observed.domainAllowList).toEqual("github.com");
 

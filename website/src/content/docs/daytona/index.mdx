@@ -39,7 +39,8 @@ export default class Api extends Cloudflare.Worker<Api>()(
         const sandbox = yield* Effect.acquireRelease(sandboxes.create(), (s) =>
           sandboxes.delete(s.sandboxId).pipe(Effect.ignore),
         );
-        return yield* HttpServerResponse.json(yield* sandbox.exec("node --version"));
+        const version = yield* sandbox.exec("node --version");
+        return yield* HttpServerResponse.json(version);
       }).pipe(Effect.scoped, Effect.orDie),
     };
   }).pipe(Effect.provide(Daytona.CreateSandboxHttp)),

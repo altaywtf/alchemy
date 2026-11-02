@@ -144,9 +144,10 @@ export const VolumeProvider = () =>
         if (name !== output.name) return { action: "replace", deleteFirst: true } as const;
       }),
       read: Effect.fn(function* ({ id, olds, output }) {
+        const name = yield* resolveName(id, olds?.name, output?.name);
         const found =
           (output ? yield* getVolumeById(output.volumeId) : undefined) ??
-          (yield* getVolumeByName(yield* resolveName(id, olds?.name, output?.name)));
+          (yield* getVolumeByName(name));
         if (found === undefined) return undefined;
         const attrs = toVolumeAttributes(found);
         return (yield* isOwnedName(id, found.name, output !== undefined)) ? attrs : Unowned(attrs);

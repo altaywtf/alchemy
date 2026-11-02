@@ -174,9 +174,10 @@ export const SecretProvider = () =>
         if (name !== output.name) return { action: "replace", deleteFirst: true } as const;
       }),
       read: Effect.fn(function* ({ id, olds, output }) {
+        const name = yield* resolveName(id, olds?.name, output?.name);
         const found =
           (output ? yield* getSecretById(output.secretId) : undefined) ??
-          (yield* findSecretByName(yield* resolveName(id, olds?.name, output?.name)));
+          (yield* findSecretByName(name));
         if (found === undefined) return undefined;
         const attrs = toSecretAttributes(found, output?.valueHash ?? "");
         return (yield* isOwnedName(id, found.name, output !== undefined)) ? attrs : Unowned(attrs);

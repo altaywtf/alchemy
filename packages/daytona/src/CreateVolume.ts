@@ -76,7 +76,8 @@ export type CreateVolumeOptions =
  *     const sandbox = yield* sandboxes.create({
  *       volumes: [{ volumeId: home.volumeId, mountPath: "/home/daytona/work" }],
  *     });
- *     return yield* HttpServerResponse.json(yield* sandbox.exec("ls /home/daytona/work"));
+ *     const ls = yield* sandbox.exec("ls /home/daytona/work");
+ *     return yield* HttpServerResponse.json(ls);
  *   }),
  * };
  * ```

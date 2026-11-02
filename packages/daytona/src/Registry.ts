@@ -101,9 +101,9 @@ export const RegistryProvider = () =>
         return all.filter((r) => r.registryType === "organization").map(toAttributes);
       }),
       read: Effect.fn(function* ({ id, olds, output }) {
+        const name = yield* resolveName(id, olds?.name, output?.name);
         const found =
-          (output ? yield* getById(output.registryId) : undefined) ??
-          (yield* findByName(yield* resolveName(id, olds?.name, output?.name)));
+          (output ? yield* getById(output.registryId) : undefined) ?? (yield* findByName(name));
         if (found === undefined) return undefined;
         const attrs = toAttributes(found);
         return (yield* isOwnedName(id, found.name, output !== undefined)) ? attrs : Unowned(attrs);
