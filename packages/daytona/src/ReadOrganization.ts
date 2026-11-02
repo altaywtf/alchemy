@@ -1,5 +1,6 @@
 import * as organizations from "@distilled.cloud/daytona/organizations";
 import * as regions from "@distilled.cloud/daytona/regions";
+import * as webhooks from "@distilled.cloud/daytona/webhooks";
 import * as Binding from "alchemy/Binding";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -12,11 +13,17 @@ const ORGANIZATION_READS = [
   "getOrganizationUsageOverview",
 ] as const;
 
-/** Read-only views of the organization: quotas, usage, GPU capacity and regions. */
+const WEBHOOK_READS = [
+  "getWebhookControllerAppPortalAccess",
+  "getWebhookControllerInitializationStatus",
+] as const;
+
+/** Read-only views of the organization: quotas, usage, GPU capacity, regions and the webhook portal. */
 export interface ReadOrganizationClient
   extends
     ScopedModule<Pick<typeof organizations, (typeof ORGANIZATION_READS)[number]>>,
-    ScopedModule<typeof regions> {}
+    ScopedModule<typeof regions>,
+    ScopedModule<Pick<typeof webhooks, (typeof WEBHOOK_READS)[number]>> {}
 
 /**
  * Read the organization's limits and usage at runtime: current usage
@@ -55,6 +62,7 @@ export const ReadOrganizationHttp = Layer.effect(
       return lazyScoped(organizationId, (id) => ({
         ...scopeModule(pick(organizations, ORGANIZATION_READS), { organizationId: id }, run),
         ...scopeModule(regions, {}, run),
+        ...scopeModule(pick(webhooks, WEBHOOK_READS), { organizationId: id }, run),
       }));
     });
   }),
