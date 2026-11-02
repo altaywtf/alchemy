@@ -56,10 +56,11 @@ export interface PersistentSandboxAttributes {
  * ### Using it at runtime
  * **Example:** Resume it from a Worker
  * ```typescript
+ * // construction phase
  * const sandboxes = yield* Modal.CreateSandbox(Coder);
- * const box = yield* DevBox;
+ * const devBoxId = yield* (yield* DevBox).persistentSandboxId;
  * // in fetch:
- * const session = yield* (yield* sandboxes.persistent(box)).session();
+ * const session = yield* (yield* sandboxes.persistent(yield* devBoxId)).session();
  * const result = yield* session.exec(["git", "status"]);
  * ```
  *

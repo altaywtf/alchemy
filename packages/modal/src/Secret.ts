@@ -81,11 +81,19 @@ export interface SecretAttributes {
  * ### Using a Secret in a Sandbox
  * **Example:** As environment variables
  * ```typescript
+ * // construction phase: read the Secret's id
+ * const openaiId = yield* (yield* OpenAI).secretId;
+ * // in a handler
+ * const openai = { secretId: yield* openaiId };
  * const sandbox = yield* sandboxes.create({ secrets: [openai] });
  * ```
  *
  * **Example:** Injected into outbound requests only
  * ```typescript
+ * // construction phase: read the Secret's id
+ * const openaiId = yield* (yield* OpenAI).secretId;
+ * // in a handler
+ * const openai = { secretId: yield* openaiId };
  * const sandbox = yield* sandboxes.create({
  *   outboundPolicy: {
  *     routes: [

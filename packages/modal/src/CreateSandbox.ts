@@ -137,6 +137,10 @@ export interface SandboxesClient {
  * ### Secrets the sandbox never sees
  * **Example:** Inject an API key into outbound requests
  * ```typescript
+ * // construction phase: read the Secret's id
+ * const openaiId = yield* (yield* OpenAI).secretId;
+ * // in a handler
+ * const openai = { secretId: yield* openaiId };
  * const sandbox = yield* sandboxes.create({
  *   outboundPolicy: {
  *     routes: [
