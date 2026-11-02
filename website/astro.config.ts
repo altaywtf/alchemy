@@ -42,6 +42,7 @@ function providersSidebarEntry() {
       { label: "PlanetScale", link: "/planetscale" },
       { label: "Neon", link: "/neon" },
       { label: "Turso", link: "/turso" },
+      { label: "Archil", link: "/archil" },
       { label: "Prisma", link: "/prisma" },
       { label: "Better Auth", link: "/better-auth" },
       { label: "Axiom", link: "/axiom" },
@@ -1352,6 +1353,33 @@ export default defineConfig({
               ],
             },
             providerResourcesEntry("Turso"),
+          ],
+        },
+        {
+          label: "Archil",
+          items: [
+            { label: "Overview", link: "/archil" },
+            { label: "Setup", link: "/archil/setup" },
+            { label: "Concepts", link: "/archil/concepts" },
+            {
+              label: "Tutorial",
+              items: [{ autogenerate: { directory: "archil/tutorial" } }],
+            },
+            {
+              label: "Storage",
+              items: [
+                { label: "Disks", link: "/archil/disks" },
+                { label: "Mounting", link: "/archil/mounting" },
+              ],
+            },
+            {
+              label: "Compute",
+              items: [
+                { label: "Sandboxes", link: "/archil/sandboxes" },
+                { label: "Network & credentials", link: "/archil/network" },
+              ],
+            },
+            providerResourcesEntry("Archil"),
           ],
         },
         {

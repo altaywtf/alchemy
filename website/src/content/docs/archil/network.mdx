@@ -1,0 +1,36 @@
+---
+title: Network & credentials
+description: Control what a sandbox can reach and add credentials on the way out.
+---
+
+Every sandbox has an outbound policy. Archil enforces it outside the microVM, so code inside can't change it.
+
+## Deny by default
+
+```typescript
+network: {
+  egress: { default: "deny", allow: ["registry.npmjs.org", "*.github.com"] },
+},
+```
+
+Deny entries win over allow entries. A wildcard matches subdomains, not the apex domain.
+
+## Add a credential on the way out
+
+An allow entry can set headers on matching HTTPS requests. The sandbox never sees the value:
+
+```typescript
+allow: [
+  { target: "api.github.com", headers: { Authorization: Alchemy.Secret("GITHUB_AUTH") } },
+],
+```
+
+Archil has no secret store, so the value lives in the sandbox's policy.
+
+## Change it while it runs
+
+```typescript
+yield* sandbox.setEgress({ default: "deny", allow: ["api.openai.com"] });
+```
+
+The new policy applies at once. On a declared `Archil.Sandbox`, changing `network` updates it in place.

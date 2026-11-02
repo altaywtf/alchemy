@@ -1,0 +1,47 @@
+---
+title: "Part 3: Run Commands in a Sandbox"
+description: Boot a sandbox with the user's disk mounted and run a command in it.
+sidebar:
+  order: 3
+---
+
+Some work needs a real machine. Boot a sandbox with the user's disk mounted, run a command, and delete the sandbox.
+
+## Declare the image
+
+```diff lang="typescript"
+export const Template = Archil.Disk("Template", {});
++
++export const Agent = Archil.Image("Agent", { source: "node:24-bookworm" });
+```
+
+## Bind a sandbox client
+
+```diff lang="typescript"
+const templates = yield* Archil.BranchDisk(Template);
++const sandboxes = yield* Archil.CreateSandbox(Agent);
+```
+
+Sandboxes this client creates boot the `Agent` image unless a call picks another.
+
+## Run a command with the disk mounted
+
+```diff lang="typescript"
++if (action === "run") {
++  const sandbox = yield* sandboxes.create({
++    name: `run-${user}`,
++    mounts: [{ disk: home.diskId, path: "/home/user" }],
++    idleTtlSeconds: 120,
++  });
++  const result = yield* sandbox.exec("wc -l /home/user/notes.md");
++  yield* sandbox.delete();
++  return HttpServerResponse.text(result.stdout);
++}
+```
+
+The sandbox sees the notes written in part 1, because the disk is the same. Add `Archil.CreateSandboxHttp` to the Worker's layer.
+
+## Where next
+
+- [Network & credentials](/archil/network): lock down what the sandbox can reach.
+- [Mounting](/archil/mounting): mount disks in your own Containers.

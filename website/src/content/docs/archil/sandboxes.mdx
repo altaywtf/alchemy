@@ -1,0 +1,71 @@
+---
+title: Sandboxes
+description: Firecracker microVMs with disks mounted, created per task or declared as a dev box.
+---
+
+A sandbox is a microVM with disks mounted and public ports. It pauses when idle and resumes on the next connection with its memory intact.
+
+## Create sandboxes at run time
+
+Bind an image, then create a sandbox per task:
+
+```typescript
+export const Agent = Archil.Image("Agent", { source: "node:24-bookworm" });
+
+const sandboxes = yield* Archil.CreateSandbox(Agent);
+const sandbox = yield* sandboxes.create({
+  name: "task-1",
+  mounts: [{ disk: home.diskId, path: "/home/user" }],
+  idleTtlSeconds: 300,
+});
+```
+
+## Run commands and move files
+
+```typescript
+yield* sandbox.writeFile("/home/user/app/.env", "MODE=test");
+const result = yield* sandbox.exec("npm test", { cwd: "/home/user/app" });
+```
+
+`run` starts a command and streams its output; the process keeps running after you detach, and `attach` picks it up again.
+
+## Pause, resume, fork
+
+```typescript
+yield* sandbox.pause();
+yield* sandbox.resume();
+const copy = yield* sandbox.fork({ name: "task-1-retry" });
+```
+
+A fork copies the sandbox's memory and disk into a new one.
+
+## Serve a port
+
+```typescript
+const { hostname } = yield* sandbox.exposePort(3000);
+const token = yield* sandbox.createPortToken(3000, "1h");
+```
+
+Give a browser the port token instead of your key.
+
+## A long-lived dev box
+
+Declare a sandbox in your Stack to keep it across deploys, and drive it with `ConnectSandbox`:
+
+```typescript
+export const DevBox = Archil.Sandbox("DevBox", { baseImage: "node:24-bookworm", ports: [3000] });
+
+const devbox = yield* Archil.ConnectSandbox(DevBox);
+yield* devbox.exec("pnpm build");
+```
+
+## Private images
+
+```typescript
+export const Agent = Archil.Image("Agent", {
+  source: "ghcr.io/acme/agent:1",
+  registryAuth: { username: "acme-bot", password: Alchemy.Secret("GHCR_TOKEN") },
+});
+```
+
+Archil uses the credentials for the build only.

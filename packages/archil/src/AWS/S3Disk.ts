@@ -92,7 +92,7 @@ export const archilBucketStatements = (input: {
  * ```
  *
  * @primitive
- * @product Disk
+ * @product S3 Disk
  */
 export const S3Disk = (id: string, props: S3DiskProps) =>
   Effect.gen(function* () {

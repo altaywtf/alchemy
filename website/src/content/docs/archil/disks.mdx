@@ -1,0 +1,88 @@
+---
+title: Disks
+description: Create disks per user at run time, share a few at deploy time, and keep files on your own bucket.
+---
+
+A disk is a filesystem that mounts in about 100 ms. Create one for each user or session at run time, and declare the few shared ones in your Stack.
+
+## Create disks at run time
+
+`Archil.CreateDisk` gives a Worker or Lambda a client that creates disks by name:
+
+```typescript
+const disks = yield* Archil.CreateDisk();
+const home = yield* disks.create(`user-${user}`);
+```
+
+Calling `create` again with the same name returns the same disk. `get`, `list`, and `delete` work on the disks this client created.
+
+## Declare a shared disk
+
+A dataset every user reads is a resource:
+
+```typescript
+// src/Storage.ts
+export const Dataset = Archil.Disk("Dataset", {});
+```
+
+Restrict where it can be mounted from with `allowedIps`, and stop sandboxes and exec from mounting it with `allowSandboxMount: false`.
+
+## Run commands and search
+
+```typescript
+const dataset = yield* Archil.ExecDisk(Dataset);
+const result = yield* dataset.exec("wc -l /mnt/archil/*.csv");
+const hits = yield* dataset.grep({ pattern: "TODO", directory: "src", recursive: true });
+```
+
+`ExecDisks` mounts several disks in one call, at paths under `/mnt/archil`.
+
+## Read and write files without a machine
+
+Every disk is also an S3-style bucket. `ReadDisk`, `WriteDisk`, and `ReadWriteDisk` use it:
+
+```typescript
+const files = yield* Archil.ReadWriteDisk(Dataset);
+yield* files.put("notes/today.md", "# Today");
+const url = yield* files.share("notes/today.md", 3600);
+```
+
+A write that conflicts with a mounted client's lock fails with `ObjectConflict`.
+
+## Branch from a checkpoint
+
+Seed a disk once and checkpoint it at deploy time:
+
+```typescript
+export const Seed = Archil.Disk("Seed", {});
+export const Base = Effect.gen(function* () {
+  const seed = yield* Seed;
+  return yield* Archil.Checkpoint("Base", {
+    disk: seed.diskId,
+    name: "base",
+    run: ["git clone --depth 1 https://github.com/acme/app repo"],
+  });
+});
+```
+
+Then fork a writable branch per session at run time:
+
+```typescript
+const seeds = yield* Archil.BranchDisk(Seed);
+const branch = yield* seeds.branch({ name: "session-42", fromCheckpoint: "base" });
+```
+
+Writes on a branch never reach the base or other branches.
+
+## Keep files on your own bucket
+
+`ArchilAWS.S3Disk` keeps a disk's files as ordinary objects in your S3 bucket. The bucket policy trusts Archil's role for your region, so no keys exist anywhere:
+
+```typescript
+import * as ArchilAWS from "@alchemy.run/archil/AWS";
+
+export const Store = AWS.S3.Bucket("Store", {});
+export const Dataset = ArchilAWS.S3Disk("Dataset", { bucket: Store, prefix: "datasets/" });
+```
+
+Set your Archil organization id in your profile first. R2, GCS, Azure Blob, and other S3-compatible stores work through `storage` on `Archil.Disk`.

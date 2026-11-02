@@ -57,6 +57,7 @@ export const TAB_ICONS: Record<string, string | undefined> = {
   PlanetScale: b("planetscale"),
   Neon: b("neon"),
   Turso: b("turso"),
+  Archil: l("hard-drive"),
   Prisma: c("prisma"),
   // Brand-colored prism for marketing surfaces (see `prismaColor` above).
   PrismaColor: c("prismaColor"),
@@ -127,6 +128,7 @@ const GROUP_ICONS: Record<string, string | undefined> = {
   GitHub: b("github"),
   Neon: b("neon"),
   Turso: b("turso"),
+  Archil: l("hard-drive"),
   Planetscale: b("planetscale"),
   PlanetScale: b("planetscale"),
   Prisma: c("prisma"),

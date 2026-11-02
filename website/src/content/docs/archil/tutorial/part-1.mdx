@@ -1,0 +1,105 @@
+---
+title: "Part 1: A Disk per User"
+description: Give every user their own Archil disk, created by a Worker on first use.
+sidebar:
+  order: 1
+---
+
+Build a notes API where every user gets their own disk. A Cloudflare Worker creates the disk the first time a user shows up, then appends notes to a file on it.
+
+The finished code is in [`examples/cloudflare-archil-workspaces`](https://github.com/alchemy-run/alchemy/tree/main/examples/cloudflare-archil-workspaces).
+
+## Prerequisites
+
+Finish [Archil setup](/archil/setup) and [Cloudflare setup](/cloudflare/setup).
+
+## Bind a disk client to the Worker
+
+```typescript
+// src/Api.ts
+import * as Archil from "@alchemy.run/archil";
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Effect from "effect/Effect";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+
+export default class Api extends Cloudflare.Worker<Api>()(
+  "Api",
+  { main: import.meta.url },
+  Effect.gen(function* () {
+    const disks = yield* Archil.CreateDisk();
+    return {
+      fetch: Effect.succeed(HttpServerResponse.text("ok")),
+    };
+  }).pipe(Effect.provide(Archil.CreateDiskHttp)),
+) {}
+```
+
+`Archil.CreateDisk()` gives the Worker its own Archil key and a client that creates disks by name. Every disk it creates carries a prefix this binding owns, so `alchemy destroy` cleans them up.
+
+## Create the user's disk
+
+```diff lang="typescript"
+fetch: Effect.gen(function* () {
++  const request = yield* HttpServerRequest;
++  const [, user] = new URL(request.url, "http://api").pathname.split("/");
++  const home = yield* disks.create(`home-${user}`);
+  return HttpServerResponse.text("ok");
+}).pipe(Effect.orDie),
+```
+
+`create` returns the disk with that name, creating it the first time. The second request for `alice` gets the same disk.
+
+## Write a note
+
+```diff lang="typescript"
+const home = yield* disks.create(`home-${user}`);
++if (request.method === "POST") {
++  yield* home.append("notes.md", `- ${yield* request.text}\n`);
++  return yield* HttpServerResponse.json({ ok: true });
++}
+```
+
+`append` writes through Archil's object API. No machine starts; the file lands on the disk.
+
+## Read the notes back
+
+```diff lang="typescript"
++const notes = yield* home.getText("notes.md").pipe(
++  Effect.catchTag("NoSuchKey", () => Effect.succeed("")),
++);
++return HttpServerResponse.text(notes);
+```
+
+A user with no notes yet gets an empty file.
+
+## Deploy
+
+```typescript
+// alchemy.run.ts
+import * as Archil from "@alchemy.run/archil";
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import Api from "./src/Api.ts";
+
+export default Alchemy.Stack(
+  "ArchilWorkspaces",
+  {
+    providers: Layer.mergeAll(Cloudflare.providers(), Archil.providers()),
+    state: Cloudflare.state(),
+  },
+  Effect.gen(function* () {
+    const api = yield* Api;
+    return { url: api.url.as<string>() };
+  }),
+);
+```
+
+```sh
+alchemy deploy
+curl -X POST $URL/alice/notes -d "buy milk"
+curl $URL/alice/notes
+```
+
+Next, give each session a copy of a seeded workspace.

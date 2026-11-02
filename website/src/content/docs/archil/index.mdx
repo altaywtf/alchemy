@@ -1,0 +1,73 @@
+---
+title: Archil
+description: Durable disks that mount in about 100 ms, serverless exec, branches, and Firecracker sandboxes.
+---
+
+Archil gives you disks that mount anywhere in about 100 ms. Hot data sits on SSD and the rest in object storage, either Archil's or your own bucket. Because a disk is that cheap to attach, it can belong to one user, one session, or one request.
+
+New here? [Set up credentials](/archil/setup) first, then [build the tutorial](/archil/tutorial/part-1).
+
+## A disk per user
+
+Most apps create disks at run time, by name. `Archil.CreateDisk` gives a Worker a client that does it:
+
+```typescript
+const disks = yield* Archil.CreateDisk();
+const home = yield* disks.create(`user-${user}`);
+```
+
+The same call returns the same disk every time. See [Disks](/archil/disks).
+
+## Run commands against a disk
+
+`exec` boots a microVM with the disk mounted, runs the command, and shuts down. Files it writes stay on the disk:
+
+```typescript
+const result = yield* home.exec("cd /mnt/archil && git pull && pnpm test");
+```
+
+## Branch from a seeded base
+
+Seed one disk at deploy time, checkpoint it, and fork a writable branch per session in about 35 ms:
+
+```typescript
+const seeds = yield* Archil.BranchDisk(Seed);
+const branch = yield* seeds.branch({ name: "session-42", fromCheckpoint: "base" });
+```
+
+## Sandboxes
+
+A sandbox is a Firecracker microVM with disks mounted, public ports, and an outbound policy that can add credentials on the way out:
+
+```typescript
+const sandboxes = yield* Archil.CreateSandbox(Agent);
+const sandbox = yield* sandboxes.create({
+  name: "task-1",
+  mounts: [{ disk: home.diskId, path: "/home/user" }],
+});
+yield* sandbox.exec("npm test", { cwd: "/home/user/app" });
+```
+
+See [Sandboxes](/archil/sandboxes) and [Network & credentials](/archil/network).
+
+## Mount on your own hosts
+
+`Archil.MountDisk` installs the Archil client into a Cloudflare Container or ECS task image and mounts disks per request:
+
+```typescript
+const dataset = yield* Archil.MountDisk(Dataset);
+const path = yield* dataset.mount({ mode: "read-only" });
+```
+
+See [Mounting](/archil/mounting).
+
+## Where next
+
+- [Concepts](/archil/concepts): deploy-time resources and run-time clients
+- [Disks](/archil/disks), [Sandboxes](/archil/sandboxes), [Mounting](/archil/mounting), [Network & credentials](/archil/network)
+
+## Out of scope
+
+- Billing (`getBillingUsage`, `getBillingSummary`, `getBillingSubscription`): billing objects, not infrastructure.
+- A workflow engine: Archil has no durable execution engine.
+- Websites: Archil doesn't host websites; a sandbox can serve a port.

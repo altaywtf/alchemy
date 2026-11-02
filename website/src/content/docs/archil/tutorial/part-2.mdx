@@ -1,0 +1,64 @@
+---
+title: "Part 2: Branch a Seeded Workspace"
+description: Seed a template disk at deploy time and fork a branch of it per session.
+sidebar:
+  order: 2
+---
+
+A new session should start from a prepared workspace, not an empty disk. Seed one template disk at deploy time, checkpoint it, and branch it per session.
+
+## Declare the template disk
+
+```typescript
+// src/Workspace.ts
+import * as Archil from "@alchemy.run/archil";
+import * as Effect from "effect/Effect";
+
+export const Template = Archil.Disk("Template", {});
+```
+
+## Seed it with a checkpoint
+
+```diff lang="typescript"
+export const Template = Archil.Disk("Template", {});
++
++export const Seeded = Effect.gen(function* () {
++  const template = yield* Template;
++  return yield* Archil.Checkpoint("Seeded", {
++    disk: template.diskId,
++    name: "seeded",
++    run: ["printf '# Notes\\n' > README.md", "mkdir -p notes"],
++  });
++});
+```
+
+Alchemy runs the commands against the disk and takes a checkpoint named `seeded`. Changing `run` takes a new checkpoint.
+
+## Add it to the Stack
+
+```diff lang="typescript"
+Effect.gen(function* () {
++  yield* Seeded;
+  const api = yield* Api;
+```
+
+## Branch per session
+
+```diff lang="typescript"
+const disks = yield* Archil.CreateDisk();
++const templates = yield* Archil.BranchDisk(Template);
+```
+
+```diff lang="typescript"
++if (action === "session") {
++  const branch = yield* templates.branch({
++    name: `session-${user}`,
++    fromCheckpoint: "seeded",
++  });
++  return yield* HttpServerResponse.json(branch);
++}
+```
+
+A branch is a writable copy of the checkpoint, made in about 35 ms whatever the disk's size. Its writes never reach the template.
+
+Add `Archil.BranchDiskHttp` to the Worker's layer next to `CreateDiskHttp`.

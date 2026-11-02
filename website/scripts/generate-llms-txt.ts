@@ -515,6 +515,25 @@ const SECTIONS: Section[] = [
     },
   },
   {
+    heading: "Archil",
+    intro:
+      "Archil disks that mount in about 100 ms: disks per user at run time, serverless exec, branches and checkpoints, sandboxes with credential-injecting egress, and mounts in your own Containers and ECS tasks.",
+    pages: {
+      slugs: [
+        "archil/index",
+        "archil/setup",
+        "archil/concepts",
+        "archil/tutorial/part-1",
+        "archil/tutorial/part-2",
+        "archil/tutorial/part-3",
+        "archil/disks",
+        "archil/mounting",
+        "archil/sandboxes",
+        "archil/network",
+      ],
+    },
+  },
+  {
     heading: "Better Auth",
     intro:
       "Better Auth as an Effect service on Workers and Lambda: a tutorial, sign-in providers, database layers, and guides for config, middleware, secondary storage, migrations, and upgrades.",

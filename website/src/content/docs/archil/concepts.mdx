@@ -1,0 +1,41 @@
+---
+title: Concepts
+description: Deploy-time resources, run-time clients, and how Alchemy owns what your app creates.
+---
+
+Archil is built for objects your app creates while it runs: a disk per user, a branch per session, a sandbox per task. Alchemy splits the API in two to match.
+
+## Deploy-time resources
+
+The few long-lived things an app shares are resources in your Stack: a dataset disk, a seeded base, an image, a dev box.
+
+```typescript
+// src/Storage.ts
+export const Dataset = Archil.Disk("Dataset", {});
+export const Agent = Archil.Image("Agent", { source: "node:24-bookworm" });
+```
+
+They deploy, update, and delete with the Stack like any other resource.
+
+## Run-time clients
+
+Everything per user or per request comes from a binding. `CreateDisk`, `CreateSandbox`, and `CreateImage` create objects by name, with the same props the resources take:
+
+```typescript
+const disks = yield* Archil.CreateDisk();
+const home = yield* disks.create("user-1");
+```
+
+Bindings that take a resource act on it: `ExecDisk(Dataset)`, `ReadDisk(Dataset)`, `BranchDisk(Seed)`, `ConnectSandbox(DevBox)`, `MountDisk(Dataset)`. Both kinds return the same disk and sandbox handles.
+
+## Who owns what your app creates
+
+Archil has no tags, so each `Create…` binding owns a name prefix and stamps it on everything it creates. Destroying the Stack deletes those disks and sandboxes. Keep user data past a destroy with `onDestroy: "retain"`:
+
+```typescript
+const disks = yield* Archil.CreateDisk({ onDestroy: "retain" });
+```
+
+## Credentials
+
+An API key can call the whole account, so each host that uses Archil bindings gets its own, revocable on its own. A disk token opens one disk and nothing else; `MountDisk(disk)` makes one per host, and `home.createToken()` makes one at run time. A port token opens one port of one sandbox, for a browser or client that shouldn't hold a key.

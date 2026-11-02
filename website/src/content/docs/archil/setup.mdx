@@ -1,0 +1,39 @@
+---
+title: Setup
+description: Give Alchemy an Archil API key.
+---
+
+import PackageManagers from "../../../components/PackageManagers.astro";
+
+Sign up at [console.archil.com](https://console.archil.com) and create an API key under **API Keys**. It starts with `key-`.
+
+## Add the provider
+
+<PackageManagers add="@alchemy.run/archil" />
+
+Then add `Archil.providers()` next to your cloud's providers:
+
+```typescript
+// alchemy.run.ts
+import * as Archil from "@alchemy.run/archil";
+
+providers: Layer.mergeAll(Cloudflare.providers(), Archil.providers()),
+```
+
+## Store the key in a profile
+
+```sh
+alchemy profile edit --add Archil
+```
+
+Paste the key, and pick the region your disks live in (`aws-us-east-1` by default). Enter your organization id only if you keep disks on your own S3 bucket; the bucket policy is scoped to it.
+
+## Use environment variables in CI
+
+```sh
+ARCHIL_API_KEY=... ARCHIL_REGION=aws-us-east-1 alchemy deploy
+```
+
+## Keys your app gets
+
+Archil keys can't be scoped, so your own key never ships to a Worker. Each host that uses Archil bindings gets its own key, created at deploy and revoked when the stack is destroyed. Hosts that only mount disks get a per-disk token instead, which Archil checks itself.
