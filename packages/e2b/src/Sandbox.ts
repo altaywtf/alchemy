@@ -1,5 +1,4 @@
 import type * as E2B from "@distilled.cloud/e2b";
-import type * as Connect from "@distilled.cloud/e2b/Connect";
 import type * as filesystem from "@distilled.cloud/e2b/filesystem";
 import type * as process from "@distilled.cloud/e2b/process";
 import type * as sandboxes from "@distilled.cloud/e2b/sandboxes";
@@ -16,18 +15,18 @@ import type { E2BUnexpectedResponse, SandboxBaseMissing } from "./Errors.ts";
 /** Errors an E2B call can fail with. */
 export type E2BError =
   | E2B.E2BOpError
-  | Connect.ConnectStreamError
+  | process.ConnectStreamError
   | SandboxBaseMissing
   | E2BUnexpectedResponse;
 
 /** A process inside a sandbox, by pid or by the tag it was started with. */
-export type ProcessSelector = Connect.ProcessSelector;
+export type ProcessSelector = process.ConnectProcessRequest["process"];
 
 /** An event from a running process: `Start`, output, `End`, `KeepAlive`. */
-export type ProcessEvent = Connect.ProcessEvent;
+export type ProcessEvent = process.ProcessEvent;
 
 /** An event from a watched directory. */
-export type WatchEvent = Connect.WatchDirEvent;
+export type WatchEvent = filesystem.WatchDirEvent;
 
 /** A file or directory inside a sandbox. */
 export type EntryInfo = filesystem.EntryInfo;

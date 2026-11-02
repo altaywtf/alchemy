@@ -5,7 +5,6 @@
  * team key is used only for control-plane calls.
  */
 import { sandboxConnectionFor } from "@distilled.cloud/e2b";
-import * as Connect from "@distilled.cloud/e2b/Connect";
 import * as envd from "@distilled.cloud/e2b/envd";
 import * as filesystem from "@distilled.cloud/e2b/filesystem";
 import * as process from "@distilled.cloud/e2b/process";
@@ -115,11 +114,11 @@ export const makeSandboxHandle = (
     info,
     commands: {
       run: (command, options) =>
-        collect(streamInSandbox(Connect.processStart(shell(command, options)))),
+        collect(streamInSandbox(process.startProcess(shell(command, options)))),
       exec: (argv, options) =>
         collect(
           streamInSandbox(
-            Connect.processStart({
+            process.startProcess({
               process: {
                 cmd: argv[0],
                 args: argv.slice(1),
@@ -131,8 +130,8 @@ export const makeSandboxHandle = (
             }),
           ),
         ),
-      start: (command, options) => streamInSandbox(Connect.processStart(shell(command, options))),
-      connect: (selector) => streamInSandbox(Connect.processConnect({ process: selector })),
+      start: (command, options) => streamInSandbox(process.startProcess(shell(command, options))),
+      connect: (selector) => streamInSandbox(process.connectProcess({ process: selector })),
       list: () =>
         inSandbox(process.listProcesses({})).pipe(Effect.map((res) => res.processes ?? [])),
       sendStdin: (selector, data) =>
@@ -149,7 +148,7 @@ export const makeSandboxHandle = (
     pty: {
       create: (options) =>
         streamInSandbox(
-          Connect.processStart({
+          process.startProcess({
             process: {
               cmd: "/bin/bash",
               args: options.command ? ["-l", "-c", options.command] : ["-i", "-l"],
@@ -202,7 +201,7 @@ export const makeSandboxHandle = (
         ),
       watch: (path, options) =>
         streamInSandbox(
-          Connect.filesystemWatchDir({
+          filesystem.watchDir({
             path,
             recursive: options?.recursive ?? false,
             includeEntry: options?.includeEntry ?? false,

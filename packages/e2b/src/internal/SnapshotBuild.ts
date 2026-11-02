@@ -4,7 +4,7 @@
  * resource and the runtime `E2B.CreateSnapshot` client.
  */
 import { sandboxConnectionFor } from "@distilled.cloud/e2b";
-import * as Connect from "@distilled.cloud/e2b/Connect";
+import * as process from "@distilled.cloud/e2b/process";
 import * as sandboxes from "@distilled.cloud/e2b/sandboxes";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
@@ -30,28 +30,30 @@ export const takeSnapshot = Effect.fn(function* (name: string, props: SnapshotSe
     (sandbox) =>
       Effect.gen(function* () {
         for (const command of props.run) {
-          const result = yield* Connect.processStart({
-            process: {
-              cmd: "/bin/bash",
-              args: ["-l", "-c", command],
-              ...(props.envs ? { envs: props.envs } : {}),
-              ...(props.cwd ? { cwd: props.cwd } : {}),
-            },
-          }).pipe(
-            Stream.runFold(
-              () => ({ exitCode: -1, stderr: "" }),
-              (acc, event) =>
-                event._tag === "End"
-                  ? { ...acc, exitCode: event.exitCode }
-                  : event._tag === "Stderr"
-                    ? {
-                        ...acc,
-                        stderr: (acc.stderr + new TextDecoder().decode(event.data)).slice(-4000),
-                      }
-                    : acc,
-            ),
-            Effect.provide(sandboxConnectionFor(sandbox)),
-          );
+          const result = yield* process
+            .startProcess({
+              process: {
+                cmd: "/bin/bash",
+                args: ["-l", "-c", command],
+                ...(props.envs ? { envs: props.envs } : {}),
+                ...(props.cwd ? { cwd: props.cwd } : {}),
+              },
+            })
+            .pipe(
+              Stream.runFold(
+                () => ({ exitCode: -1, stderr: "" }),
+                (acc, event) =>
+                  event._tag === "End"
+                    ? { ...acc, exitCode: event.exitCode }
+                    : event._tag === "Stderr"
+                      ? {
+                          ...acc,
+                          stderr: (acc.stderr + new TextDecoder().decode(event.data)).slice(-4000),
+                        }
+                      : acc,
+              ),
+              Effect.provide(sandboxConnectionFor(sandbox)),
+            );
           if (result.exitCode !== 0) {
             return yield* new SnapshotSetupFailed({
               message: `snapshot ${name}: \`${command}\` exited with ${result.exitCode}`,
