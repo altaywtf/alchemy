@@ -5,6 +5,7 @@ import { makeModalBinding } from "./BindingHttp.ts";
 import { CreateSandbox, type SandboxesClient } from "./CreateSandbox.ts";
 import type { Image } from "./Image.ts";
 import type { ModalClient } from "./ModalBindings.ts";
+import type { Sandbox } from "./Sandbox.ts";
 import {
   createSandbox,
   listSandboxes,
@@ -56,7 +57,9 @@ export const makeSandboxesClient = (
     ),
 });
 
-const isImage = (target: App | Image): target is Image => target.Type === "Modal.Image";
+const isImage = (target: App | Image | Sandbox): target is Image => target.Type === "Modal.Image";
+const isProgram = (target: App | Image | Sandbox): target is Sandbox =>
+  target.Type === "Modal.Sandbox";
 
 /**
  * {@link CreateSandbox} over Modal's API. Binds the deployer's Modal token
@@ -70,7 +73,34 @@ export const CreateSandboxHttp = Layer.effect(
   CreateSandbox,
   makeModalBinding({
     tag: "Modal.CreateSandbox",
-    make: Effect.fn(function* (resource: App | Image, client) {
+    make: Effect.fn(function* (resource: App | Image | Sandbox, client) {
+      if (isProgram(resource)) {
+        const imageId = yield* resource.imageId;
+        const appId = yield* resource.appId;
+        const appName = yield* resource.appName;
+        const environment = yield* resource.environment;
+        const secretId = yield* resource.secretId;
+        const command = yield* resource.command;
+        const port = yield* resource.port;
+        const target = Effect.all({
+          imageId,
+          appId,
+          appName,
+          environment,
+          secretId,
+          command,
+          port,
+        }).pipe(
+          Effect.map((t): SandboxTarget => ({
+            imageId: t.imageId,
+            appId: t.appId,
+            appName: t.appName,
+            environment: t.environment,
+            program: { secretId: t.secretId, command: t.command, port: t.port },
+          })),
+        );
+        return makeSandboxesClient(target, client);
+      }
       if (isImage(resource)) {
         const imageId = yield* resource.imageId;
         const appId = yield* resource.appId;

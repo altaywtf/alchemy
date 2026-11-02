@@ -59,15 +59,18 @@
   "dependencies": {
     "@alchemy.run/docker": "workspace:*",
     "@distilled.cloud/core": "workspace:*",
-    "@distilled.cloud/modal": "workspace:*"
+    "@distilled.cloud/modal": "workspace:*",
+    "rolldown": "catalog:"
   },
   "devDependencies": {
+    "@effect/platform-node": "catalog:",
     "@types/bun": "catalog:",
     "alchemy": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {
+    "@effect/platform-node": "catalog:",
     "alchemy": "workspace:*",
     "effect": "catalog:"
   },

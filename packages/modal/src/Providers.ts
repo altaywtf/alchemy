@@ -12,6 +12,7 @@ import { FunctionAutoscaler, FunctionAutoscalerProvider } from "./FunctionAutosc
 import { Image, ImageProvider } from "./Image.ts";
 import { Proxy, ProxyProvider } from "./Proxy.ts";
 import { Queue, QueueProvider } from "./Queue.ts";
+import { Sandbox, SandboxProvider } from "./Sandbox.ts";
 import { Secret, SecretProvider } from "./Secret.ts";
 import { Volume, VolumeProvider } from "./Volume.ts";
 import { WebhookToken, WebhookTokenProvider } from "./WebhookToken.ts";
@@ -45,6 +46,7 @@ export const providers = () =>
       Image,
       Proxy,
       Queue,
+      Sandbox,
       Secret,
       Volume,
       WebhookToken,
@@ -60,6 +62,7 @@ export const providers = () =>
         ImageProvider(),
         ProxyProvider(),
         QueueProvider(),
+        SandboxProvider(),
         SecretProvider(),
         VolumeProvider(),
         WebhookTokenProvider(),

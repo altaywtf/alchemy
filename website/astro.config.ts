@@ -1369,6 +1369,7 @@ export default defineConfig({
               label: "Sandboxes",
               items: [
                 { label: "Sandboxes", link: "/modal/sandboxes/sandboxes" },
+                { label: "Programs", link: "/modal/sandboxes/programs" },
                 { label: "Images", link: "/modal/sandboxes/images" },
                 { label: "Snapshots", link: "/modal/sandboxes/snapshots" },
               ],

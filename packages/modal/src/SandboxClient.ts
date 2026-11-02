@@ -6,6 +6,9 @@ import * as router from "@distilled.cloud/modal/task_command_router";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { buildImage, gpuConfig, type ImageBuildSpec } from "./ImageBuild.ts";
 import { environmentOf, seconds } from "./internal.ts";
 
@@ -221,6 +224,15 @@ export interface SandboxHandleOf<R> {
   ): Effect.Effect<{ readonly exitCode?: number; readonly status: string }, any, R>;
   /** Terminate the sandbox (no-op when it already finished). */
   terminate(): Effect.Effect<void, any, R>;
+  /**
+   * Send a request to the program's port (a `Modal.Sandbox` program's
+   * `fetch` handler, or `port`): the URL's path and query are kept, the host
+   * is the sandbox's tunnel.
+   */
+  fetch(
+    request: HttpClientRequest.HttpClientRequest,
+    options?: { readonly port?: number },
+  ): Effect.Effect<HttpClientResponse.HttpClientResponse, any, R>;
 }
 
 /** A sandbox handle as bindings return it: calls run inside a deployed runtime. */
@@ -238,6 +250,12 @@ export interface SandboxTarget {
   readonly appName?: string;
   /** Image used when `create` names none. */
   readonly imageId?: string;
+  /** A `Modal.Sandbox` program: the secret holding its env, its command, and its port. */
+  readonly program?: {
+    readonly secretId: string;
+    readonly command: ReadonlyArray<string>;
+    readonly port: number;
+  };
 }
 
 const outputText = (batches: ReadonlyArray<container.RuntimeOutputBatch>, fd: string) => {
@@ -369,7 +387,7 @@ export const resolveSandboxImage = Effect.fn(function* (
 /** The handle for an existing sandbox id. */
 export const sandboxHandle = (
   sandboxId: string,
-  target: Pick<SandboxTarget, "environment">,
+  target: Pick<SandboxTarget, "environment" | "program">,
 ): RawSandboxHandle => {
   let cachedTaskId: string | undefined;
   const taskId = Effect.gen(function* () {
@@ -654,6 +672,27 @@ export const sandboxHandle = (
         status: result?.status ?? "GENERIC_STATUS_UNSPECIFIED",
       };
     }),
+    fetch: Effect.fn(function* (request, options = {}) {
+      const port = options.port ?? target.program?.port;
+      if (port === undefined) {
+        return yield* new SandboxUnexpectedResponse({
+          message: "fetch needs a port: create the sandbox from a Modal.Sandbox, or pass { port }",
+        });
+      }
+      const tunnels = yield* handle.tunnels(50);
+      const tunnel = tunnels[port];
+      if (!tunnel) {
+        return yield* new SandboxUnexpectedResponse({
+          message: `Port ${port} of sandbox ${sandboxId} has no tunnel; open it with encryptedPorts`,
+        });
+      }
+      const url = new URL(request.url, "http://sandbox");
+      // The user's own program, reached through its tunnel (allowed raw HTTP).
+      const http = yield* HttpClient.HttpClient;
+      return yield* http.execute(
+        HttpClientRequest.setUrl(request, `${tunnel.url}${url.pathname}${url.search}`),
+      );
+    }),
     terminate: Effect.fn(function* () {
       yield* sandbox
         .sandboxTerminateV2({ sandboxId })
@@ -672,9 +711,18 @@ export const createSandbox = Effect.fn(function* (
   options: SandboxCreateOptions = {},
 ) {
   const imageId = yield* resolveSandboxImage(target, options.image);
+  const program = target.program;
+  const withProgram: SandboxCreateOptions = program
+    ? {
+        ...options,
+        command: options.command ?? program.command,
+        secrets: [{ secretId: program.secretId }, ...(options.secrets ?? [])],
+        encryptedPorts: [...new Set([program.port, ...(options.encryptedPorts ?? [])])],
+      }
+    : options;
   const created = yield* sandbox.sandboxCreateV2({
     appId: target.appId,
-    definition: definitionOf(imageId, options),
+    definition: definitionOf(imageId, withProgram),
     tags: Object.entries(options.tags ?? {}).map(([tagName, tagValue]) => ({ tagName, tagValue })),
   });
   if (!created.sandboxId) {

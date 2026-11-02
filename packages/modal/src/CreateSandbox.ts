@@ -3,6 +3,7 @@ import type { RuntimeContext } from "alchemy/RuntimeContext";
 import type * as Effect from "effect/Effect";
 import type { App } from "./App.ts";
 import type { Image } from "./Image.ts";
+import type { Sandbox } from "./Sandbox.ts";
 import type { SandboxCreateOptions, SandboxHandle } from "./SandboxClient.ts";
 
 export type {
@@ -121,7 +122,7 @@ export interface SandboxesClient {
 export interface CreateSandbox extends Binding.Service<
   CreateSandbox,
   "Modal.CreateSandbox",
-  (target: App | Image) => Effect.Effect<SandboxesClient>
+  (target: App | Image | Sandbox) => Effect.Effect<SandboxesClient>
 > {}
 
 export const CreateSandbox = Binding.Service<CreateSandbox>("Modal.CreateSandbox");
