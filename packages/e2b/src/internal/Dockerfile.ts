@@ -66,11 +66,14 @@ const instructionsOf = (text: string): Instruction[] => {
     if (buffer === "" && (trimmed === "" || trimmed.startsWith("#"))) continue;
     if (buffer !== "" && trimmed.startsWith("#")) continue;
     if (buffer === "") start = i + 1;
+    // Like Docker, a continuation removes only the backslash and newline:
+    // the next line's indentation is kept.
+    const part = buffer === "" ? raw.trimStart() : raw;
     if (trimmed.endsWith("\\")) {
-      buffer += trimmed.slice(0, -1) + " ";
+      buffer += part.trimEnd().slice(0, -1);
       continue;
     }
-    buffer += trimmed;
+    buffer += part.trimEnd();
     const match = /^(\S+)\s*([\s\S]*)$/.exec(buffer);
     if (match) out.push({ name: match[1]!.toUpperCase(), rest: match[2]!.trim(), line: start });
     buffer = "";

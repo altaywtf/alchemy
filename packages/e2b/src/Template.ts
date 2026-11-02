@@ -1,10 +1,26 @@
 import * as templates from "@distilled.cloud/e2b/templates";
 import { Unowned } from "alchemy/AdoptPolicy";
+import type * as Bundle from "alchemy/Bundle/Bundle";
 import { isResolved } from "alchemy/Diff";
+import { Platform, type Main, type PlatformProps } from "alchemy/Platform";
 import * as Provider from "alchemy/Provider";
-import { Resource } from "alchemy/Resource";
+import type { Resource, ResourceBinding } from "alchemy/Resource";
+import {
+  createContainerRuntimeContext,
+  type HostRuntimeContext,
+  type ServerHost,
+} from "alchemy/Runtime/Process";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import { e2bName, isGeneratedName } from "./internal/Ownership.ts";
+import {
+  APP_DIR,
+  bundleProgram,
+  DEFAULT_PORT,
+  DEFAULT_PROGRAM_IMAGE,
+  programCommands,
+  programEnv,
+} from "./internal/Program.ts";
 import {
   planTemplateBuild,
   runTemplateBuild,
@@ -19,7 +35,38 @@ export type {
   TemplateSource,
 } from "./internal/TemplateBuild.ts";
 
-export interface TemplateProps extends TemplateSource {
+export interface TemplateProps extends Omit<TemplateSource, "env">, PlatformProps {
+  /**
+   * A program to run in every sandbox: a module entrypoint, typically
+   * `import.meta.url` in the class form. Alchemy bundles it, copies it into
+   * the template, and starts it with Node as the template's start command, so
+   * every sandbox boots with it already serving on {@link port}. The image
+   * must have Node 22 or later.
+   * @default no program
+   */
+  main?: string;
+  /**
+   * Named export to load from `main`.
+   * @default "default"
+   */
+  handler?: string;
+  /**
+   * Port the program serves HTTP on, as `PORT`. A sandbox serves it at
+   * `sandbox.url(port)`.
+   * @default 3000
+   */
+  port?: number;
+  /** Bundler configuration for `main`. */
+  build?: Bundle.BundleConfig;
+  /**
+   * Environment variables for the template. With a program, also the
+   * program's environment, after the values its bindings set.
+   *
+   * Values are written into the template, so every sandbox created from it
+   * can read them. A `Redacted` value is not exposed in Alchemy's state or
+   * logs, but code inside the sandbox can read it.
+   */
+  env?: Record<string, any>;
   /**
    * Template name, used to create sandboxes from it. Lowercase letters,
    * digits, `-` and `_`. If omitted, a unique name is generated from the
@@ -58,6 +105,8 @@ export interface TemplateAttributes {
   buildId: string;
   /** Content hash of the build inputs. A deploy rebuilds only when it changes. */
   buildHash: string;
+  /** Content hash of the build inputs other than bindings' env, compared at plan time. */
+  sourceHash: string;
   /** Fully qualified names, e.g. `my-team/my-template:default`. */
   names: string[];
   public: boolean;
@@ -65,11 +114,16 @@ export interface TemplateAttributes {
   memoryMB: number | undefined;
 }
 
+/** What bindings attach to a template program: its environment. */
+export interface TemplateBinding {
+  env?: Record<string, any>;
+}
+
 export interface Template extends Resource<
   "E2B.Template",
   TemplateProps,
   TemplateAttributes,
-  never,
+  TemplateBinding,
   Providers
 > {}
 
@@ -153,7 +207,14 @@ export interface Template extends Resource<
  * @resource
  * @product Template
  */
-export const Template = Resource<Template>("E2B.Template");
+export const Template: Platform<
+  Template,
+  ServerHost,
+  Main<ServerHost>,
+  HostRuntimeContext
+> = Platform("E2B.Template", {
+  createRuntimeContext: createContainerRuntimeContext("E2B.Template"),
+});
 
 /** A template by id, or by name (alias). */
 export const observeTemplate = (templateId: string | undefined, name: string) =>
@@ -167,7 +228,73 @@ export const observeTemplate = (templateId: string | undefined, name: string) =>
     Effect.catchTag("NotFound", () => Effect.undefined),
   );
 
-const specOf = (name: string, news: TemplateProps): TemplateBuildSpec => ({ ...news, name });
+const boundEnv = (bindings: ReadonlyArray<ResourceBinding<TemplateBinding>> | undefined) =>
+  (bindings ?? [])
+    .filter(
+      (binding: ResourceBinding<TemplateBinding> & { action?: string }) =>
+        binding.action !== "delete",
+    )
+    .reduce<Record<string, unknown>>((env, binding) => ({ ...env, ...binding.data?.env }), {});
+
+/** The build spec for a template: its source, plus its bundled program when it has one. */
+const specOf = Effect.fn(function* (
+  name: string,
+  news: TemplateProps,
+  bindings: ReadonlyArray<ResourceBinding<TemplateBinding>> | undefined,
+) {
+  const { main, handler, port, build, env, ...source } = news;
+  if (main === undefined) {
+    return {
+      ...source,
+      name,
+      env: yield* programEnvFor(env),
+    } satisfies TemplateBuildSpec;
+  }
+  const programPort = port ?? DEFAULT_PORT;
+  const program = yield* bundleProgram({
+    main,
+    handler,
+    build,
+    isExternal: (news as { isExternal?: boolean }).isExternal,
+  });
+  const commands = programCommands(programPort);
+  const hasSource =
+    source.image !== undefined ||
+    source.dockerfile !== undefined ||
+    source.fromTemplate !== undefined;
+  return {
+    ...source,
+    name,
+    ...(hasSource ? {} : { image: DEFAULT_PROGRAM_IMAGE }),
+    files: [
+      ...(source.files ?? []),
+      ...program.files.map((file) => ({
+        path: `__alchemy__/${file.path}`,
+        contents: file.contents,
+        dest: `${APP_DIR}/${file.path}`,
+      })),
+    ],
+    env: yield* programEnv(programPort, boundEnv(bindings), env),
+    startCmd: source.startCmd ?? commands.startCmd,
+    readyCmd: source.readyCmd ?? commands.readyCmd,
+  } satisfies TemplateBuildSpec;
+});
+
+/** `env` for a template without a program: plain values only. */
+const programEnvFor = (env: Readonly<Record<string, unknown>> | undefined) =>
+  Effect.succeed(
+    env === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(env).flatMap(([key, value]) =>
+            Redacted.isRedacted(value)
+              ? [[key, String(Redacted.value(value))]]
+              : typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+                ? [[key, String(value)]]
+                : [],
+          ),
+        ),
+  );
 
 export const TemplateProvider = () =>
   Provider.effect(
@@ -182,8 +309,10 @@ export const TemplateProvider = () =>
           if (output === undefined) return undefined;
           // The plan hash reads the build context, so a changed file under an
           // unchanged `context` path still rebuilds.
-          const plan = yield* planTemplateBuild(specOf(name, news));
-          if (plan.hash !== output.buildHash || news.force) return { action: "update" } as const;
+          // Bindings may be unresolved here; the engine reconciles when they
+          // change. Diff compares the hash of everything else.
+          const plan = yield* planTemplateBuild(yield* specOf(name, news, undefined));
+          if (plan.hash !== output.sourceHash || news.force) return { action: "update" } as const;
           if ((news.public ?? false) !== output.public) return { action: "update" } as const;
           return undefined;
         }),
@@ -196,6 +325,7 @@ export const TemplateProvider = () =>
             name,
             buildId: template.buildID,
             buildHash: output?.buildHash ?? "",
+            sourceHash: output?.sourceHash ?? "",
             names: [...template.names],
             public: template.public,
             cpuCount: template.cpuCount,
@@ -203,13 +333,17 @@ export const TemplateProvider = () =>
           };
           return output !== undefined || olds?.name === undefined ? attrs : Unowned(attrs);
         }),
-        reconcile: Effect.fn(function* ({ id, news, output, session }) {
+        reconcile: Effect.fn(function* ({ id, news, output, bindings, session }) {
           const name = output?.name ?? (yield* e2bName(id, news.name));
-          const spec = specOf(name, news);
+          const spec = yield* specOf(name, news, bindings);
 
           // Observe
           const observed = yield* observeTemplate(output?.templateId, name);
           const plan = yield* planTemplateBuild(spec);
+          const sourceHash =
+            bindings === undefined || bindings.length === 0
+              ? plan.hash
+              : (yield* planTemplateBuild(yield* specOf(name, news, undefined))).hash;
 
           // Ensure — build when there is no ready build of these exact inputs.
           let attrs: TemplateAttributes;
@@ -224,6 +358,7 @@ export const TemplateProvider = () =>
               name,
               buildId: observed.buildID,
               buildHash: plan.hash,
+              sourceHash,
               names: [...observed.names],
               public: observed.public,
               cpuCount: observed.cpuCount,
@@ -237,6 +372,7 @@ export const TemplateProvider = () =>
               name,
               buildId: built.buildId,
               buildHash: plan.hash,
+              sourceHash,
               names: [...built.names],
               public: built.public,
               cpuCount: news.cpuCount,
@@ -269,6 +405,7 @@ export const TemplateProvider = () =>
               name: template.aliases.find(isGeneratedName) ?? template.templateID,
               buildId: template.buildID,
               buildHash: "",
+              sourceHash: "",
               names: [...template.names],
               public: template.public,
               cpuCount: template.cpuCount,

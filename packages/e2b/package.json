@@ -58,15 +58,18 @@
   },
   "dependencies": {
     "@distilled.cloud/core": "workspace:*",
-    "@distilled.cloud/e2b": "workspace:*"
+    "@distilled.cloud/e2b": "workspace:*",
+    "rolldown": "catalog:"
   },
   "devDependencies": {
+    "@effect/platform-node": "catalog:",
     "@types/bun": "catalog:",
     "alchemy": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {
+    "@effect/platform-node": "catalog:",
     "alchemy": "workspace:*",
     "effect": "catalog:"
   },
